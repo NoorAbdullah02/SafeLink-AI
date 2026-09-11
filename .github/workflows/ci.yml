@@ -4,7 +4,7 @@ on:
     branches: [master]
   pull_request:
 permissions:
-  contents: read
+  contents: write
 jobs:
   web-api:
     runs-on: ubuntu-latest
@@ -45,3 +45,12 @@ jobs:
         with:
           name: SafeLink-AI-debug-apk
           path: mobile/build/app/outputs/flutter-apk/app-debug.apk
+      - name: Publish Direct APK Download Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/master'
+        with:
+          tag_name: v1.0.0
+          name: SafeLink AI Mobile App v1.0.0
+          body: "Direct download link for SafeLink AI Android APK. Tap below to install directly on your phone."
+          files: mobile/build/app/outputs/flutter-apk/app-debug.apk
+
