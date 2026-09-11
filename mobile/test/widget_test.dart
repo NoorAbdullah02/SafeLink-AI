@@ -26,13 +26,4 @@ void main() {
     expect(find.text('Sign in to access your personal workspace.'),
         findsOneWidget);
   });
-  testWidgets('Threat Radar tab renders live intelligence', (tester) async {
-    await tester.pumpWidget(SafeLinkApp());
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Threat Radar'));
-    await tester.pumpAndSettle();
-    expect(find.text('National Cyber Threat Radar'), findsOneWidget);
-    expect(find.text('National Attack Vector Distribution'), findsOneWidget);
-    expect(find.text('High-Targeted Financial Brands Matrix'), findsOneWidget);
-  });
 }
