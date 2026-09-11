@@ -343,6 +343,71 @@ class _WorkspaceState extends State<Workspace> {
                   style: TextStyle(fontSize: 12)),
               value: external,
               onChanged: (v) => setState(() => external = v)),
+          Padding(
+            padding: EdgeInsets.only(bottom: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('⚡ Quick Demo Scenarios:',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.grey.shade700)),
+                SizedBox(height: 6),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      ActionChip(
+                        avatar: Icon(Icons.link, size: 16, color: Colors.red),
+                        label: Text('bKash Spoof Link'),
+                        onPressed: () => setState(() {
+                          kind = 'url';
+                          input.text = 'https://bkash-reward.xyz/login';
+                          result = null;
+                        }),
+                      ),
+                      SizedBox(width: 8),
+                      ActionChip(
+                        avatar: Icon(Icons.chat_bubble_outline,
+                            size: 16, color: Colors.orange),
+                        label: Text('Banglish PIN Scam'),
+                        onPressed: () => setState(() {
+                          kind = 'message';
+                          input.text =
+                              'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.';
+                          result = null;
+                        }),
+                      ),
+                      SizedBox(width: 8),
+                      ActionChip(
+                        avatar: Icon(Icons.card_giftcard,
+                            size: 16, color: Colors.orange),
+                        label: Text('Bangla Lottery Scam'),
+                        onPressed: () => setState(() {
+                          kind = 'message';
+                          input.text =
+                              'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।';
+                          result = null;
+                        }),
+                      ),
+                      SizedBox(width: 8),
+                      ActionChip(
+                        avatar: Icon(Icons.check_circle_outline,
+                            size: 16, color: green),
+                        label: Text('Official Safe Site'),
+                        onPressed: () => setState(() {
+                          kind = 'url';
+                          input.text = 'https://www.bkash.com';
+                          result = null;
+                        }),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
           FilledButton.icon(
               onPressed: busy ? null : scanText,
               icon: Icon(Icons.shield_outlined),
@@ -448,6 +513,13 @@ class _WorkspaceState extends State<Workspace> {
               padding: EdgeInsets.all(12),
               child: SelectableText(r['extractedText']))
         ]),
+      SizedBox(height: 14),
+      FilledButton.tonalIcon(
+        icon: Icon(Icons.description_outlined),
+        label: Text('Export Cyber Threat Report'),
+        onPressed: () => showThreatReport(r),
+      ),
+      SizedBox(height: 10),
       if (r['persisted'] == true)
         Wrap(spacing: 10, children: [
           TextButton.icon(
@@ -470,6 +542,261 @@ class _WorkspaceState extends State<Workspace> {
       if (r['persisted'] != true)
         Text('This result has not been saved.', style: TextStyle(fontSize: 12))
     ]));
+  }
+
+  void showThreatReport(Map<String, dynamic> r) {
+    final score = (r['score'] as num).toInt();
+    final color = score >= 50
+        ? Colors.deepOrange
+        : score >= 25
+            ? Colors.orange
+            : green;
+    final id = (r['id'] ?? '').toString();
+    final ref = id.length >= 16 ? id.substring(0, 16).toUpperCase() : id.toUpperCase();
+    final evidence = (r['evidence'] as List? ?? []);
+    final urls = (r['urls'] as List? ?? []).join(', ');
+    final phones = (r['phones'] as List? ?? []).join(', ');
+
+    final plainReportText = '''
+==================================================
+SAFELINK AI CYBER DEFENSE LABS
+National Cyber Fraud Assessment & Incident Registry (Bangladesh)
+==================================================
+INCIDENT REF: $ref
+TIMESTAMP: ${DateTime.tryParse(r['createdAt'] ?? '')?.toLocal().toString() ?? DateTime.now().toString()}
+THREAT LEVEL: ${r['level']?.toString().toUpperCase()}
+RISK INDEX: $score / 100
+VECTOR TYPE: ${r['kind']?.toString().toUpperCase()}
+TARGET: ${r['preview'] ?? urls}
+${phones.isNotEmpty ? 'IDENTIFIED PHONES/MFS: $phones\n' : ''}
+FORENSIC FINDINGS:
+${evidence.map((e) => '- [${e['id']}] ${e['title']}: ${e['detail']} (+${e['weight']} pts)').join('\n')}
+
+${r['aiExplanation'] != null ? 'AI FRAUD INTERPRETATION:\n${r['aiExplanation']}\n\n' : ''}RECOMMENDED ACTION:
+${r['recommendation']}
+
+EMERGENCY FRAUD HELPLINES (BANGLADESH):
+- bKash Helpline: 16247
+- Nagad Helpline: 16167
+- Bangladesh Police Cyber Support: 01320-000888 / 999
+==================================================
+Official forensic audit record generated by SafeLink AI.
+''';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          constraints: BoxConstraints(
+              maxWidth: 600,
+              maxHeight: MediaQuery.of(context).size.height * 0.85),
+          padding: EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: green, borderRadius: BorderRadius.circular(8)),
+                    child: Icon(Icons.shield_outlined,
+                        color: Colors.white, size: 22),
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('SAFELINK AI CYBER DEFENSE',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13,
+                                letterSpacing: 0.5)),
+                        Text('Incident Investigation Report',
+                            style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                      icon: Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx)),
+                ],
+              ),
+              Divider(height: 24),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: color.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            Text('$score',
+                                style: TextStyle(
+                                    fontSize: 36,
+                                    fontWeight: FontWeight.w800,
+                                    color: color)),
+                            Text(' /100',
+                                style: TextStyle(fontWeight: FontWeight.w600)),
+                            SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(r['level'] ?? '',
+                                      style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w700)),
+                                  Text(r['threatType'] ?? '',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade700)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: 14),
+                      Text('INCIDENT REFERENCE: $ref',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5)),
+                      Text('VECTOR: ${r['kind']?.toString().toUpperCase()}',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade800)),
+                      if (r['preview'] != null) ...[
+                        SizedBox(height: 4),
+                        Text('TARGET: ${r['preview']}',
+                            style: TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w600)),
+                      ],
+                      if (phones.isNotEmpty) ...[
+                        SizedBox(height: 4),
+                        Text('IDENTIFIED PHONE: $phones',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.blue.shade800)),
+                      ],
+                      SizedBox(height: 14),
+                      Text('FORENSIC EVIDENCE & FINDINGS',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.5)),
+                      SizedBox(height: 6),
+                      if (evidence.isEmpty)
+                        Text('No malicious indicators found.',
+                            style:
+                                TextStyle(fontSize: 12, color: Colors.grey)),
+                      for (final e in evidence)
+                        Padding(
+                          padding: EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.warning_amber_rounded,
+                                  size: 16, color: color),
+                              SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                    '${e['title']}: ${e['detail']} (+${e['weight']} pts)',
+                                    style: TextStyle(fontSize: 12)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (r['aiExplanation'] != null) ...[
+                        SizedBox(height: 14),
+                        Text('AI FRAUD ANALYSIS',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.5)),
+                        SizedBox(height: 4),
+                        Container(
+                          padding: EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                              color: Colors.green.shade50,
+                              borderRadius: BorderRadius.circular(8)),
+                          child: Text(r['aiExplanation'],
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.green.shade900)),
+                        ),
+                      ],
+                      SizedBox(height: 14),
+                      Text('INCIDENT RESPONSE ADVISORY',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.5)),
+                      SizedBox(height: 4),
+                      Text(r['recommendation'] ?? '',
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w500)),
+                      SizedBox(height: 12),
+                      Container(
+                        padding: EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('BANGLADESH FRAUD HELPLINES:',
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.grey.shade700)),
+                            SizedBox(height: 4),
+                            Text(
+                                '• bKash: 16247  |  Nagad: 16167\n• Bangladesh Police Cyber Crime: 01320-000888 / 999',
+                                style: TextStyle(
+                                    fontSize: 11, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Divider(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: Icon(Icons.copy, size: 16),
+                      label: Text('Copy Official Report'),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: plainReportText));
+                        Navigator.pop(ctx);
+                        message('Cyber Threat Report copied to clipboard.');
+                      },
+                    ),
+                  ),
+                  SizedBox(width: 10),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: Text('Done'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget signInPanel() => panel(Column(children: [
