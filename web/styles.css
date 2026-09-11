@@ -2601,4 +2601,155 @@ body { background: var(--bg); color: var(--text); }
   color: var(--muted);
 }
 
+/* ==========================================================================
+   1-Click Competition Demo Scenario Cards
+   ========================================================================== */
+.demo-scenarios-panel {
+  margin-top: 28px;
+  padding: 22px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+.demo-scenarios-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.demo-scenarios-header h3 {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.demo-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: var(--mint);
+  color: var(--green);
+  border: 1px solid var(--line);
+}
+.demo-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+@media (max-width: 1024px) {
+  .demo-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 580px) {
+  .demo-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.demo-scenario-card {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+.demo-scenario-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+.demo-scenario-card.danger {
+  border-top: 4px solid #ef4444;
+}
+.demo-scenario-card.danger:hover {
+  border-color: #ef4444;
+}
+.demo-scenario-card.warning {
+  border-top: 4px solid #f97316;
+}
+.demo-scenario-card.warning:hover {
+  border-color: #f97316;
+}
+.demo-scenario-card.success {
+  border-top: 4px solid #10b981;
+}
+.demo-scenario-card.success:hover {
+  border-color: #10b981;
+}
+
+.demo-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.demo-icon-wrap {
+  font-size: 20px;
+}
+.demo-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+.demo-tag.danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+.demo-tag.warning {
+  background: rgba(249, 115, 22, 0.12);
+  color: #ea580c;
+}
+.demo-tag.success {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+
+.demo-scenario-card strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.demo-preview {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  margin: 0 0 12px;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-family: var(--font-mono, monospace);
+  background: var(--surface);
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+.demo-action {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--green);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+}
+.demo-scenario-card:hover .demo-action {
+  text-decoration: underline;
+}
+
+
 

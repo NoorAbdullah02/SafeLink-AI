@@ -594,54 +594,89 @@ function Scanner({
               </div>
             </form>
           </Tabs.Root>
-          <div className="sample-row demo-chips-row">
-            <div className="demo-chips-label">
-              <span>⚡ Competition Quick Scenarios:</span>
+          <div className="demo-scenarios-panel">
+            <div className="demo-scenarios-header">
+              <div>
+                <span className="eyebrow">⚡ 1-CLICK COMPETITION DEMO SCENARIOS</span>
+                <h3>Instant Test Cards (Tap any card to analyze)</h3>
+              </div>
+              <span className="demo-badge">4 LIVE SAMPLES</span>
             </div>
-            <div className="demo-chips-wrap">
+            <div className="demo-cards-grid">
               <button
                 type="button"
-                className="chip-btn chip-danger"
+                className="demo-scenario-card danger"
                 onClick={() => {
                   setKind('url');
                   setText('https://bkash-reward.xyz/login');
                   setResult(null);
+                  document.getElementById('scan-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }}
               >
-                🔗 bKash Spoof Link
+                <div className="demo-card-top">
+                  <span className="demo-icon-wrap">🔗</span>
+                  <span className="demo-tag danger">HOMOGRAPH SPOOF</span>
+                </div>
+                <strong>bKash Spoof Link</strong>
+                <p className="demo-preview">https://bkash-reward.xyz/login</p>
+                <span className="demo-action">Test Scenario →</span>
               </button>
+
               <button
                 type="button"
-                className="chip-btn chip-warning"
+                className="demo-scenario-card warning"
                 onClick={() => {
                   setKind('message');
                   setText('Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.');
                   setResult(null);
+                  document.getElementById('scan-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }}
               >
-                💬 Banglish PIN Scam
+                <div className="demo-card-top">
+                  <span className="demo-icon-wrap">💬</span>
+                  <span className="demo-tag warning">BANGLISH OTP</span>
+                </div>
+                <strong>Banglish PIN Scam</strong>
+                <p className="demo-preview">Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.</p>
+                <span className="demo-action">Test Scenario →</span>
               </button>
+
               <button
                 type="button"
-                className="chip-btn chip-warning"
+                className="demo-scenario-card warning"
                 onClick={() => {
                   setKind('message');
                   setText('অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।');
                   setResult(null);
+                  document.getElementById('scan-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }}
               >
-                🎁 Bangla Lottery Scam
+                <div className="demo-card-top">
+                  <span className="demo-icon-wrap">🎁</span>
+                  <span className="demo-tag warning">BANGLA LOTTERY</span>
+                </div>
+                <strong>Bangla Lottery Scam</strong>
+                <p className="demo-preview">অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।</p>
+                <span className="demo-action">Test Scenario →</span>
               </button>
+
               <button
                 type="button"
-                className="chip-btn chip-success"
+                className="demo-scenario-card success"
                 onClick={() => {
                   setKind('url');
                   setText('https://www.bkash.com');
                   setResult(null);
+                  document.getElementById('scan-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }}
               >
-                ✅ Official Safe Site
+                <div className="demo-card-top">
+                  <span className="demo-icon-wrap">✅</span>
+                  <span className="demo-tag success">VERIFIED SAFE</span>
+                </div>
+                <strong>Official Safe Site</strong>
+                <p className="demo-preview">https://www.bkash.com</p>
+                <span className="demo-action">Test Scenario →</span>
               </button>
             </div>
           </div>

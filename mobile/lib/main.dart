@@ -365,46 +365,28 @@ class _WorkspaceState extends State<Workspace> {
                       ActionChip(
                         avatar: Icon(Icons.link, size: 16, color: Colors.red),
                         label: Text('bKash Spoof Link'),
-                        onPressed: () => setState(() {
-                          kind = 'url';
-                          input.text = 'https://bkash-reward.xyz/login';
-                          result = null;
-                        }),
+                        onPressed: () => loadDemoScenario('url', 'https://bkash-reward.xyz/login'),
                       ),
                       SizedBox(width: 8),
                       ActionChip(
                         avatar: Icon(Icons.chat_bubble_outline,
                             size: 16, color: Colors.orange),
                         label: Text('Banglish PIN Scam'),
-                        onPressed: () => setState(() {
-                          kind = 'message';
-                          input.text =
-                              'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.';
-                          result = null;
-                        }),
+                        onPressed: () => loadDemoScenario('message', 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.'),
                       ),
                       SizedBox(width: 8),
                       ActionChip(
                         avatar: Icon(Icons.card_giftcard,
                             size: 16, color: Colors.orange),
                         label: Text('Bangla Lottery Scam'),
-                        onPressed: () => setState(() {
-                          kind = 'message';
-                          input.text =
-                              'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।';
-                          result = null;
-                        }),
+                        onPressed: () => loadDemoScenario('message', 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।'),
                       ),
                       SizedBox(width: 8),
                       ActionChip(
                         avatar: Icon(Icons.check_circle_outline,
                             size: 16, color: green),
                         label: Text('Official Safe Site'),
-                        onPressed: () => setState(() {
-                          kind = 'url';
-                          input.text = 'https://www.bkash.com';
-                          result = null;
-                        }),
+                        onPressed: () => loadDemoScenario('url', 'https://www.bkash.com'),
                       ),
                     ],
                   ),
@@ -438,23 +420,97 @@ class _WorkspaceState extends State<Workspace> {
         ]),
         SizedBox(height: 22),
         if (result != null) resultPanel(result!),
-        if (result == null)
+                if (result == null) ...[
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: green.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: green.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.flash_on, color: green, size: 18),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '1-TAP COMPETITION DEMO SCENARIOS',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: green,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: green,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '4 LIVE',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(height: 10),
+          Text(
+            'Tap any card below to instantly load and run analysis in the AI engine:',
+            style: TextStyle(fontSize: 12, color: Colors.black54),
+          ),
+          SizedBox(height: 12),
+          _demoScenarioCard(
+            icon: Icons.link,
+            color: Colors.red,
+            title: '🔗 bKash Spoof Link',
+            tag: 'HOMOGRAPH SPOOF',
+            preview: 'https://bkash-reward.xyz/login',
+            onTap: () => loadDemoScenario('url', 'https://bkash-reward.xyz/login'),
+          ),
+          _demoScenarioCard(
+            icon: Icons.chat_bubble_outline,
+            color: Colors.deepOrange,
+            title: '💬 Banglish PIN Scam',
+            tag: 'BANGLISH OTP',
+            preview: 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.',
+            onTap: () => loadDemoScenario('message', 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.'),
+          ),
+          _demoScenarioCard(
+            icon: Icons.card_giftcard,
+            color: Colors.orange,
+            title: '🎁 Bangla Lottery Scam',
+            tag: 'BANGLA LOTTERY',
+            preview: 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।',
+            onTap: () => loadDemoScenario('message', 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।'),
+          ),
+          _demoScenarioCard(
+            icon: Icons.check_circle_outline,
+            color: green,
+            title: '✅ Official Safe Site',
+            tag: 'VERIFIED SAFE',
+            preview: 'https://www.bkash.com',
+            onTap: () => loadDemoScenario('url', 'https://www.bkash.com'),
+          ),
+          SizedBox(height: 12),
           panel(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Icon(Icons.verified_user_outlined, color: green, size: 30),
-            SizedBox(height: 12),
+            Icon(Icons.verified_user_outlined, color: green, size: 28),
+            SizedBox(height: 10),
             Text('Understand the warning.',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
-            SizedBox(height: 8),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+            SizedBox(height: 6),
             Text(
-                'Get a risk score, specific evidence and practical next steps. A padlock alone does not make a website trustworthy.'),
-            TextButton(
-                onPressed: () => setState(() {
-                      kind = 'message';
-                      input.text =
-                          'Apnar bKash account bondho! Ekhoni https://bkash-verify.example e PIN din.';
-                    }),
-                child: Text('Try a controlled sample →'))
-          ]))
+                'SafeLink analyzes homograph typos, Banglish deception, credential traps and unverified hostnames. A green padlock alone does not make a link trustworthy.',
+                style: TextStyle(fontSize: 13, height: 1.4)),
+          ])),
+        ]
       ];
   Widget resultPanel(Map<String, dynamic> r) {
     final score = (r['score'] as num).toInt();
@@ -576,6 +632,12 @@ class _WorkspaceState extends State<Workspace> {
               child: SelectableText(r['extractedText']))
         ]),
       SizedBox(height: 14),
+      OutlinedButton.icon(
+        icon: Icon(Icons.restart_alt, size: 16),
+        label: Text('Test Another Demo Scenario'),
+        onPressed: () => setState(() => result = null),
+      ),
+      SizedBox(height: 10),
       FilledButton.tonalIcon(
         icon: Icon(Icons.description_outlined),
         label: Text('Export Cyber Threat Report'),
@@ -1132,6 +1194,118 @@ Official forensic audit record generated by SafeLink AI.
             Text(subtitle,
                 style: TextStyle(fontSize: 10, color: Colors.black54)),
           ],
+        ),
+      );
+
+  void loadDemoScenario(String scenarioKind, String scenarioText) {
+    setState(() {
+      kind = scenarioKind;
+      input.text = scenarioText;
+      result = null;
+    });
+    scanText();
+  }
+
+  Widget _demoScenarioCard({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String tag,
+    required String preview,
+    required VoidCallback onTap,
+  }) =>
+      Card(
+        elevation: 0,
+        margin: EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: color.withValues(alpha: 0.35), width: 1.2),
+        ),
+        color: color.withValues(alpha: 0.04),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(icon, size: 18, color: color),
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        tag,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding:
+                      EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.black12),
+                  ),
+                  child: Text(
+                    preview,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                      color: Colors.black87,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Text(
+                      'Tap to Test Scenario →',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: color,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       );
 
