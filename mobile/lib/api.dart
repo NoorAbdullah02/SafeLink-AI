@@ -4,12 +4,27 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 class SafeLinkApi {
-  static const base =
+  static const defaultBase =
       String.fromEnvironment('API_URL', defaultValue: 'http://10.0.2.2:3001');
   final storage = const FlutterSecureStorage();
   String? token;
+  String? customBase;
+
+  String get base => customBase ?? defaultBase;
+
   Future<void> restore() async {
     token = await storage.read(key: 'session');
+    customBase = await storage.read(key: 'api_url');
+  }
+
+  Future<void> setBaseUrl(String? url) async {
+    if (url != null && url.trim().isNotEmpty) {
+      customBase = url.trim().replaceAll(RegExp(r'/+$'), '');
+      await storage.write(key: 'api_url', value: customBase);
+    } else {
+      customBase = null;
+      await storage.delete(key: 'api_url');
+    }
   }
 
   Map<String, String> get headers => {

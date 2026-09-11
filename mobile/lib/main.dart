@@ -192,6 +192,40 @@ class _WorkspaceState extends State<Workspace> {
         simple = value['simpleMode'] == true;
       });
     }
+  Future<void> changeServerUrl() async {
+    final controller = TextEditingController(text: api.base);
+    final saved = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+                title: Text('Server Connection'),
+                content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                          'Enter SafeLink API address (e.g. your PC IP http://192.168.0.100:3001 or deployed URL):',
+                          style: TextStyle(fontSize: 13)),
+                      SizedBox(height: 14),
+                      TextField(
+                          controller: controller,
+                          decoration: InputDecoration(
+                              labelText: 'API URL',
+                              hintText: 'http://192.168.0.100:3001')),
+                    ]),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(c, false),
+                      child: Text('Cancel')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(c, true),
+                      child: Text('Save & Connect'))
+                ]));
+    if (saved == true && mounted) {
+      await api.setBaseUrl(controller.text);
+      setState(() => status = 'Connecting to ${api.base}…');
+      await initialize();
+    }
+    controller.dispose();
   }
 
   Widget panel(Widget child) => Card(
@@ -235,9 +269,25 @@ class _WorkspaceState extends State<Workspace> {
                                     MediaQuery.textScalerOf(context).scale(1) *
                                         1.15)
                                 : MediaQuery.textScalerOf(context)),
-                        child: ListView(padding: EdgeInsets.all(20), children: [
-                          Text(status,
-                              style: TextStyle(fontSize: 12, color: green)),
+                          InkWell(
+                            onTap: changeServerUrl,
+                            borderRadius: BorderRadius.circular(6),
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 4),
+                              child: Row(children: [
+                                Expanded(
+                                  child: Text(status,
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: status.contains('unavailable')
+                                              ? Colors.red
+                                              : green,
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                                Icon(Icons.settings, size: 14, color: Colors.grey)
+                              ]),
+                            ),
+                          ),
                           SizedBox(height: 22),
                           ...content,
                           if (busy)
@@ -666,6 +716,16 @@ class _WorkspaceState extends State<Workspace> {
                     }),
                 child: Text('Sign out'))
           ])),
+        panel(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          title('Server Connection'),
+          Text('Current API: ${api.base}',
+              style: TextStyle(fontSize: 13, color: Colors.grey)),
+          SizedBox(height: 12),
+          OutlinedButton.icon(
+              onPressed: changeServerUrl,
+              icon: Icon(Icons.dns_outlined),
+              label: Text('Change Server URL')),
+        ])),
         panel(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           title('Privacy & protection'),
           Text(
