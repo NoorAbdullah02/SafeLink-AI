@@ -192,6 +192,8 @@ class _WorkspaceState extends State<Workspace> {
         simple = value['simpleMode'] == true;
       });
     }
+  }
+
   Future<void> changeServerUrl() async {
     final controller = TextEditingController(text: api.base);
     final saved = await showDialog<bool>(
