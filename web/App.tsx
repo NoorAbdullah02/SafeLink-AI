@@ -40,6 +40,8 @@ import {
   LockKeyhole,
   CheckCircle2,
   ExternalLink,
+  Printer,
+  FileText,
 } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { api, post } from './api';
@@ -592,17 +594,56 @@ function Scanner({
               </div>
             </form>
           </Tabs.Root>
-          <div className="sample-row">
-            <span>Just exploring?</span>
-            <button
-              onClick={() => {
-                setKind('message');
-                setText(demos[0].text);
-                setResult(null);
-              }}
-            >
-              Try a sample message <ArrowUpRight size={14} />
-            </button>
+          <div className="sample-row demo-chips-row">
+            <div className="demo-chips-label">
+              <span>⚡ Competition Quick Scenarios:</span>
+            </div>
+            <div className="demo-chips-wrap">
+              <button
+                type="button"
+                className="chip-btn chip-danger"
+                onClick={() => {
+                  setKind('url');
+                  setText('https://bkash-reward.xyz/login');
+                  setResult(null);
+                }}
+              >
+                🔗 bKash Spoof Link
+              </button>
+              <button
+                type="button"
+                className="chip-btn chip-warning"
+                onClick={() => {
+                  setKind('message');
+                  setText('Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.');
+                  setResult(null);
+                }}
+              >
+                💬 Banglish PIN Scam
+              </button>
+              <button
+                type="button"
+                className="chip-btn chip-warning"
+                onClick={() => {
+                  setKind('message');
+                  setText('অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।');
+                  setResult(null);
+                }}
+              >
+                🎁 Bangla Lottery Scam
+              </button>
+              <button
+                type="button"
+                className="chip-btn chip-success"
+                onClick={() => {
+                  setKind('url');
+                  setText('https://www.bkash.com');
+                  setResult(null);
+                }}
+              >
+                ✅ Official Safe Site
+              </button>
+            </div>
           </div>
         </section>
         <aside className="scan-side">
@@ -708,6 +749,7 @@ function Result({
   requireAuth: () => void;
 }) {
   const [saved, setSaved] = useState(Boolean(r.saved));
+  const [reportOpen, setReportOpen] = useState(false);
   const resultRef = useRef<HTMLElement>(null);
   useEffect(() => {
     setSaved(Boolean(r.saved));
@@ -804,6 +846,14 @@ function Result({
             : 'This result has not been saved.'}{' '}
           Score is not a probability.
         </small>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setReportOpen(true)}
+        >
+          <FileText size={15} />
+          Export Threat Report
+        </Button>
         {r.persisted && user ? (
           <>
             <Button
@@ -849,7 +899,168 @@ function Result({
           )
         )}
       </div>
+      {reportOpen && (
+        <ThreatReportModal result={r} onClose={() => setReportOpen(false)} />
+      )}
     </section>
+  );
+}
+
+function ThreatReportModal({
+  result: r,
+  onClose,
+}: {
+  result: ScanResult;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal threat-report-modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="Cyber Threat Assessment Report"
+      >
+        <div className="report-modal-header no-print">
+          <div className="report-modal-title">
+            <FileText size={20} />
+            <span>Cyber Threat Incident & Assessment Report</span>
+          </div>
+          <div className="report-modal-actions">
+            <Button
+              className="primary"
+              size="sm"
+              onClick={() => window.print()}
+            >
+              <Printer size={16} /> Print / Save as PDF
+            </Button>
+            <Button variant="outline" size="sm" onClick={onClose}>
+              <X size={16} /> Close
+            </Button>
+          </div>
+        </div>
+
+        <div className="threat-report-sheet" id="printable-threat-report">
+          <div className="report-header">
+            <div className="report-logo-group">
+              <div className="report-badge-icon">
+                <ShieldCheck size={36} />
+              </div>
+              <div>
+                <h1>SAFELINK AI CYBER DEFENSE LABS</h1>
+                <p>National Threat Assessment & Incident Verification Registry · Bangladesh</p>
+              </div>
+            </div>
+            <div className="report-meta-box">
+              <div><strong>INCIDENT REF:</strong> <code>{r.id.slice(0, 16).toUpperCase()}</code></div>
+              <div><strong>TIMESTAMP:</strong> {new Date(r.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Dhaka', dateStyle: 'medium', timeStyle: 'medium' })} BST</div>
+              <div><strong>THREAT LEVEL:</strong> <span className={'report-pill ' + (r.score >= 50 ? 'pill-crit' : r.score >= 25 ? 'pill-warn' : 'pill-safe')}>{r.level.toUpperCase()}</span></div>
+            </div>
+          </div>
+
+          <div className="report-divider" />
+
+          <div className="report-grid-2">
+            <div className="report-box">
+              <h3>Target Artifact Under Investigation</h3>
+              <table className="report-table">
+                <tbody>
+                  <tr>
+                    <td>Vector Type</td>
+                    <td><strong>{r.kind.toUpperCase()}</strong></td>
+                  </tr>
+                  <tr>
+                    <td>Target / Preview</td>
+                    <td className="break-all"><code>{r.preview || (r.urls && r.urls[0] ? r.urls[0] : 'Content obscured for privacy')}</code></td>
+                  </tr>
+                  {r.urls && r.urls.length > 0 && (
+                    <tr>
+                      <td>Identified URLs</td>
+                      <td className="break-all">{r.urls.join(', ')}</td>
+                    </tr>
+                  )}
+                  {r.phones && r.phones.length > 0 && (
+                    <tr>
+                      <td>Identified MFS/Phone</td>
+                      <td><strong>{r.phones.join(', ')}</strong></td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="report-box">
+              <h3>Threat Index & Scoring Matrix</h3>
+              <div className="report-score-panel">
+                <div className="score-big" style={{ color: r.score >= 50 ? '#c53030' : r.score >= 25 ? '#dd6b20' : '#2f855a' }}>
+                  {r.score}<span>/100</span>
+                </div>
+                <div>
+                  <h4>{r.level}</h4>
+                  <p>{r.threatType || 'No strong threat markers'}</p>
+                  <small>Calculated via 4-Layer Heuristic, Community & Semantic Engine</small>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="report-box report-evidence-box">
+            <h3>Forensic Evidence & Indicators of Compromise (IoC)</h3>
+            {r.evidence && r.evidence.length > 0 ? (
+              <table className="evidence-table">
+                <thead>
+                  <tr>
+                    <th>Rule ID</th>
+                    <th>Source</th>
+                    <th>Threat Finding</th>
+                    <th>Weight</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.evidence.map((e) => (
+                    <tr key={e.id}>
+                      <td><code>{e.id}</code></td>
+                      <td><span className="source-tag">{e.source}</span></td>
+                      <td><strong>{e.title}:</strong> {e.detail}</td>
+                      <td>+{e.weight} pts</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="no-threat-note">No malicious indicators or spoofing artifacts identified by rule heuristics.</p>
+            )}
+          </div>
+
+          {r.aiExplanation && (
+            <div className="report-box report-ai-box">
+              <h3>Mistral AI Semantic Fraud Interpretation</h3>
+              <p>{r.aiExplanation}</p>
+            </div>
+          )}
+
+          <div className="report-box report-advisory-box">
+            <h3>Incident Response & Actionable Advisory</h3>
+            <p><strong>Primary Recommendation:</strong> {r.recommendation}</p>
+            <div className="emergency-contacts">
+              <div>📞 <strong>bKash Fraud Helpline:</strong> 16247</div>
+              <div>📞 <strong>Nagad Helpline:</strong> 16167</div>
+              <div>🚨 <strong>Bangladesh Police Cyber Support:</strong> 01320-000888 / 999</div>
+            </div>
+          </div>
+
+          <div className="report-footer">
+            <div className="report-seal">
+              <ShieldCheck size={18} />
+              <span>OFFICIAL SAFELINK AI FORENSIC AUDIT RECORD</span>
+            </div>
+            <div className="report-disclaimer">
+              Generated by SafeLink AI Cyber Platform. Valid for digital threat auditing, institutional fraud escalation, and MFS consumer safety protection in Bangladesh.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 function SignInRequired({ requireAuth }: Pick<Props, 'requireAuth'>) {

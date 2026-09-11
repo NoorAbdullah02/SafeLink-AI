@@ -1988,3 +1988,371 @@ body { background: var(--bg); color: var(--text); }
 
 /* Keep settings and account controls reachable on short laptop screens. */
 .sidebar { overflow-y:auto; overscroll-behavior:contain; } .sidebar>*, .sidebar-bottom { flex-shrink:0; }
+
+/* Competition Quick Demo Chips */
+.demo-chips-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--mint);
+  border: 1px dashed var(--line);
+}
+.demo-chips-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.demo-chips-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.chip-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(0,0,0,0.08);
+}
+.chip-btn.chip-danger {
+  border-color: #feb2b2;
+  color: #c53030;
+  background: #fff5f5;
+}
+.chip-btn.chip-danger:hover {
+  background: #fed7d7;
+}
+.chip-btn.chip-warning {
+  border-color: #fbd38d;
+  color: #c05621;
+  background: #fffaf0;
+}
+.chip-btn.chip-warning:hover {
+  background: #feebc8;
+}
+.chip-btn.chip-success {
+  border-color: #9ae6b4;
+  color: #276749;
+  background: #f0fff4;
+}
+.chip-btn.chip-success:hover {
+  background: #c6f6d5;
+}
+
+/* Official Cyber Threat Incident Report Modal & Sheet */
+.modal.threat-report-modal {
+  width: min(880px, calc(100vw - 32px));
+  max-width: 880px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 0;
+  border-radius: 16px;
+  background: var(--bg);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+}
+.report-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.report-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text);
+}
+.report-modal-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.threat-report-sheet {
+  background: #ffffff;
+  color: #1a202c;
+  padding: 36px 40px;
+  margin: 16px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+.report-logo-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.report-badge-icon {
+  background: #17876b;
+  color: #ffffff;
+  padding: 10px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+}
+.report-logo-group h1 {
+  font-size: 19px;
+  letter-spacing: 0.5px;
+  margin: 0;
+  font-weight: 800;
+  color: #172f29;
+}
+.report-logo-group p {
+  font-size: 11px;
+  margin: 3px 0 0;
+  color: #718096;
+}
+.report-meta-box {
+  text-align: right;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #4a5568;
+}
+.report-meta-box code {
+  background: #edf2f7;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.report-pill {
+  display: inline-block;
+  font-weight: 700;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.5px;
+}
+.pill-crit { background: #fed7d7; color: #9b2c2c; }
+.pill-warn { background: #feebc8; color: #9c4221; }
+.pill-safe { background: #c6f6d5; color: #22543d; }
+.report-divider {
+  height: 2px;
+  background: linear-gradient(to right, #17876b, #e2e8f0);
+  margin: 20px 0;
+}
+.report-grid-2 {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+.report-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+.report-box h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 12px;
+  color: #2d3748;
+  font-weight: 700;
+}
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.report-table td {
+  padding: 6px 0;
+  border-bottom: 1px solid #edf2f7;
+  color: #4a5568;
+}
+.report-table td:first-child {
+  width: 35%;
+  font-weight: 600;
+  color: #718096;
+}
+.break-all {
+  word-break: break-all;
+}
+.report-score-panel {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.report-score-panel .score-big {
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1;
+}
+.report-score-panel .score-big span {
+  font-size: 16px;
+  font-weight: 500;
+  color: #718096;
+}
+.report-score-panel h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a202c;
+}
+.report-score-panel p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: #4a5568;
+}
+.report-score-panel small {
+  display: block;
+  font-size: 10px;
+  color: #a0aec0;
+  margin-top: 4px;
+}
+.report-evidence-box {
+  margin-bottom: 20px;
+}
+.evidence-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.evidence-table th {
+  background: #edf2f7;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #4a5568;
+  font-weight: 700;
+}
+.evidence-table td {
+  padding: 10px;
+  border-bottom: 1px solid #edf2f7;
+  color: #2d3748;
+}
+.source-tag {
+  background: #e2e8f0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.no-threat-note {
+  font-size: 12px;
+  color: #718096;
+  margin: 0;
+}
+.report-ai-box {
+  margin-bottom: 20px;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+.report-ai-box p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #166534;
+  margin: 0;
+}
+.report-advisory-box {
+  margin-bottom: 24px;
+  border-left: 4px solid #17876b;
+}
+.report-advisory-box p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #2d3748;
+  margin: 0 0 12px;
+}
+.emergency-contacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  background: #ffffff;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+.report-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 16px;
+  gap: 20px;
+}
+.report-seal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #17876b;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+.report-disclaimer {
+  font-size: 10px;
+  color: #a0aec0;
+  max-width: 500px;
+  text-align: right;
+  line-height: 1.4;
+}
+
+/* Print CSS */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .modal-backdrop {
+    position: static !important;
+    background: none !important;
+  }
+  .modal.threat-report-modal {
+    position: static !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: none !important;
+    overflow: visible !important;
+  }
+  #printable-threat-report, #printable-threat-report * {
+    visibility: visible;
+  }
+  #printable-threat-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 20px;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
