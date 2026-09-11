@@ -2751,5 +2751,186 @@ body { background: var(--bg); color: var(--text); }
   text-decoration: underline;
 }
 
+/* ==========================================================================
+   Offline Helpline & Safety Directory
+   ========================================================================== */
+.directory-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.directory-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.directory-filter-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter-pill {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.filter-pill:hover,
+.filter-pill.active {
+  background: var(--mint);
+  color: var(--green);
+  border-color: var(--green);
+}
+.golden-rules-section {
+  padding: 20px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+.golden-rules-section h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.golden-rules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.golden-rule-card {
+  padding: 14px;
+  border-left: 3px solid var(--green);
+}
+.golden-rule-card strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+.golden-rule-card p {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  margin: 0;
+}
+.directory-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+.directory-card {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+}
+.dir-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  gap: 10px;
+}
+.dir-card-head strong {
+  display: block;
+  font-size: 15px;
+  color: var(--text);
+}
+.bengali-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.dir-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--mint);
+  color: var(--green);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.dir-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  margin: 0 0 14px;
+  flex: 1;
+}
+.dir-numbers-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  background: var(--bg);
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+.num-block small {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+.hotline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--green);
+  text-decoration: none;
+}
+.hotline-link:hover {
+  text-decoration: underline;
+}
+.num-block code {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-family: var(--font-mono, monospace);
+}
+.dir-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.domain-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+}
+.copy-btn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.copy-btn:hover {
+  background: var(--mint);
+  color: var(--green);
+  border-color: var(--green);
+}
+
+
 
 

@@ -42,6 +42,8 @@ import {
   ExternalLink,
   Printer,
   FileText,
+  PhoneCall,
+  BookOpen,
 } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { api, post } from './api';
@@ -55,10 +57,11 @@ type User = {
   simpleMode: boolean;
 };
 type Page =
-  'scanner' | 'dashboard' | 'history' | 'community' | 'family' | 'settings' | 'demo' | 'admin';
+  'scanner' | 'dashboard' | 'directory' | 'history' | 'community' | 'family' | 'settings' | 'demo' | 'admin';
 const nav = [
   { id: 'scanner', label: 'Scan center', icon: ScanLine },
-  { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
+  { id: 'dashboard', label: 'Overview & Radar', icon: LayoutDashboard },
+  { id: 'directory', label: 'Helpline Directory', icon: PhoneCall },
   { id: 'history', label: 'Scan history', icon: History },
   { id: 'community', label: 'Community', icon: Users },
   { id: 'family', label: 'Family Shield', icon: HeartHandshake },
@@ -312,6 +315,7 @@ export default function App() {
               }}
             />
           )}
+          {page === 'directory' && <HelplineDirectory notify={props.notify} />}
           {page === 'history' && <HistoryPage {...props} version={refresh} initialSelection={historySelection} />}
           {page === 'community' && <Community {...props} />}
           {page === 'family' && (
@@ -1334,6 +1338,282 @@ function Dashboard(props: Props & { version: number; onOpen: (r: ScanResult) => 
     </>
   );
 }
+
+function HelplineDirectory({ notify }: { notify: (s: string) => void }) {
+  const [query, setQuery] = useState('');
+  const [activeCategory, setActiveCategory] = useState<string>('all');
+
+  const categories = [
+    { id: 'all', label: 'All Services' },
+    { id: 'mfs', label: 'MFS & Wallets' },
+    { id: 'law', label: 'Cyber Police & BTRC' },
+    { id: 'bank', label: 'Commercial Banks' },
+    { id: 'rules', label: '৫টি গোল্ডেন রুলস' },
+  ];
+
+  const helplines = [
+    {
+      category: 'mfs',
+      name: 'bKash Limited',
+      bengaliName: 'বিকাশ লিমিটেড',
+      hotline: '16247',
+      shortcode: '*247#',
+      domain: 'bkash.com',
+      verified: true,
+      tag: 'Critical MFS',
+      desc: 'Never share your 5-digit PIN or SMS OTP with anyone calling from any number.',
+    },
+    {
+      category: 'mfs',
+      name: 'Nagad (Postal MFS)',
+      bengaliName: 'নগদ (ডাক বিভাগ)',
+      hotline: '16167',
+      shortcode: '*167#',
+      domain: 'nagad.com.bd',
+      verified: true,
+      tag: 'Critical MFS',
+      desc: 'Only dial *167# from your registered mobile SIM. Nagad never calls asking for PIN.',
+    },
+    {
+      category: 'mfs',
+      name: 'Rocket (Dutch-Bangla Bank)',
+      bengaliName: 'রকেট (ডিবিবিএল)',
+      hotline: '16216',
+      shortcode: '*322#',
+      domain: 'dutchbanglabank.com/rocket',
+      verified: true,
+      tag: 'MFS Hotlist',
+      desc: 'DBBL Core MFS. Call 16216 immediately if your phone is lost or balance is compromised.',
+    },
+    {
+      category: 'mfs',
+      name: 'Upay (UCB Fintech)',
+      bengaliName: 'উপায় (ইউসিবি)',
+      hotline: '16268',
+      shortcode: '*268#',
+      domain: 'upaybd.com',
+      verified: true,
+      tag: 'MFS Hotlist',
+      desc: 'United Commercial Bank MFS customer support and transaction dispute line.',
+    },
+    {
+      category: 'law',
+      name: 'National Emergency Dispatch',
+      bengaliName: 'জাতীয় জরুরি সেবা (পুলিশ/অ্যাম্বুলেন্স)',
+      hotline: '999',
+      shortcode: '999 (Toll Free)',
+      domain: 'police.gov.bd',
+      verified: true,
+      tag: '24/7 Dispatch',
+      desc: 'Toll-free 24/7 emergency dispatch for cyber extortion, physical threat or instant police aid.',
+    },
+    {
+      category: 'law',
+      name: 'CID Cyber Police Centre (CPC)',
+      bengaliName: 'সিআইডি সাইবার পুলিশ সেন্টার',
+      hotline: '01320000888',
+      shortcode: '01320-000888',
+      domain: 'cid.police.gov.bd',
+      verified: true,
+      tag: 'Cyber Police HQ',
+      desc: 'Official specialized cyber crime investigation wing of Bangladesh Police. Email: smmcpc-cid@police.gov.bd',
+    },
+    {
+      category: 'law',
+      name: 'BTRC Telecom Consumer Desk',
+      bengaliName: 'বিটিআরসি সাইবার ও কল কমপ্লেইন',
+      hotline: '100',
+      shortcode: '100 (Toll Free)',
+      domain: 'btrc.gov.bd',
+      verified: true,
+      tag: 'Telecom Regulator',
+      desc: 'Report spoofed caller IDs, illegal VoIP calls, mass scam SMS and unapproved SIM usage.',
+    },
+    {
+      category: 'law',
+      name: 'DMP Cyber Crime Division',
+      bengaliName: 'ডিএমপি সাইবার ক্রাইম ইনভেস্টিগেশন',
+      hotline: '01769691522',
+      shortcode: '01769-691522',
+      domain: 'dmp.gov.bd',
+      verified: true,
+      tag: 'Dhaka Police Desk',
+      desc: 'Dhaka Metropolitan Police dedicated cyber fraud investigation team for GD and case registration.',
+    },
+    {
+      category: 'bank',
+      name: 'BRAC Bank (Astha App Desk)',
+      bengaliName: 'ব্র্যাক ব্যাংক (আস্থা অ্যাপ)',
+      hotline: '16221',
+      shortcode: '+88028801221',
+      domain: 'bracbank.com',
+      verified: true,
+      tag: 'Commercial Bank',
+      desc: '24/7 card blocking and Astha digital banking security desk.',
+    },
+    {
+      category: 'bank',
+      name: 'Islami Bank Bangladesh (Cellfin)',
+      bengaliName: 'ইসলামী ব্যাংক (সেলফিন)',
+      hotline: '16259',
+      shortcode: '+88028331090',
+      domain: 'islamibankbd.com',
+      verified: true,
+      tag: 'Commercial Bank',
+      desc: 'Contact for Cellfin unauthorized transactions and emergency ATM card deactivation.',
+    },
+    {
+      category: 'bank',
+      name: 'The City Bank (Citytouch)',
+      bengaliName: 'সিটি ব্যাংক (সিটিটাচ)',
+      hotline: '16234',
+      shortcode: '+88028331040',
+      domain: 'thecitybank.com',
+      verified: true,
+      tag: 'Commercial Bank',
+      desc: '24/7 online fraud monitoring and debit/credit card blocking hotline.',
+    },
+    {
+      category: 'bank',
+      name: 'Eastern Bank Limited (EBL Skybanking)',
+      bengaliName: 'ইস্টার্ন ব্যাংক (ইবিএল)',
+      hotline: '16230',
+      shortcode: '+8809612316230',
+      domain: 'ebl.com.bd',
+      verified: true,
+      tag: 'Commercial Bank',
+      desc: 'Helpline for international card dispute and Skybanking unauthorized transaction freeze.',
+    },
+  ];
+
+  const goldenRules = [
+    {
+      title: '১. পিন (PIN) ও ওটিপি (OTP) কখনোই কারো নয়',
+      desc: 'কোনো ব্যাংক, বিকাশ বা সরকারি কর্মকর্তা কখনোই আপনার গোপন পিন বা ওটিপি জানতে চাইবে না। কেউ পিন চাইলেই বুঝবেন সে ১০০% প্রতারক।',
+    },
+    {
+      title: '২. "ভুল করে টাকা চলে গেছে" নাটকে সতর্ক থাকুন',
+      desc: 'কেউ ফোন করে টাকা ফেরত চাইলে কখনো সরাসরি টাকা পাঠাবেন না। আগে নিজের ফোনের অফিশিয়াল অ্যাপ বা কোড ডায়াল করে মূল ব্যালেন্স যাচাই করুন।',
+    },
+    {
+      title: '৩. লটারি বা চাকরির ফি ফাঁদ',
+      desc: 'আসল কোনো লটারি বা সরকারি/বেসরকারি চাকরির ক্ষেত্রে পুরস্কার নেওয়ার জন্য আগে টাকা বা বিকাশ ফি পাঠাতে হয় না।',
+    },
+    {
+      title: '৪. অপরিচিত লিংকে পাসওয়ার্ড না দেওয়া',
+      desc: 'মেসেজে আসা অচেনা লিংকে ক্লিক করে বিকাশ, নগদ বা ব্যাংকের পিন/পাসওয়ার্ড লিখবেন না। সবসময় অফিশিয়াল অ্যাপ ও ডোমেন ব্যবহার করুন।',
+    },
+    {
+      title: '৫. সন্দেহ হলেই তাৎক্ষণিক কল দিয়ে ব্লক করুন',
+      desc: 'কোনো প্রতারণামূলক লেনদেনের সন্দেহ হলে দেরি না করে সরাসরি অফিশিয়াল হটলাইনে (যেমন বিকাশ ১৬২৪৭ বা নগদ ১৬১৬৭) কল দিয়ে অ্যাকাউন্ট সাময়িক স্থগিত করুন।',
+    },
+  ];
+
+  const filtered = helplines.filter((item) => {
+    const matchesCat = activeCategory === 'all' || item.category === activeCategory;
+    const matchesQuery =
+      query.trim() === '' ||
+      item.name.toLowerCase().includes(query.toLowerCase()) ||
+      item.bengaliName.includes(query) ||
+      item.hotline.includes(query) ||
+      item.domain.toLowerCase().includes(query.toLowerCase());
+    return matchesCat && matchesQuery;
+  });
+
+  return (
+    <div className="directory-page">
+      <PageTitle
+        eyebrow="OFFLINE DIRECTORY & OFFICIAL HELPLINE"
+        title="National Cyber & Financial Helpline Directory"
+        text="Verified official hotlines, USSD codes and whitelisted domains across Bangladesh. Works completely client-side without internet."
+      />
+
+      <div className="directory-controls">
+        <div className="search-box">
+          <Search size={18} />
+          <input
+            placeholder="Search by institution, hotline (16247) or domain (bkash.com)…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className="directory-filter-tabs">
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={'filter-pill ' + (activeCategory === c.id ? 'active' : '')}
+              onClick={() => setActiveCategory(c.id)}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activeCategory === 'rules' || query.toLowerCase().includes('rule') || query.includes('নিয়ম') ? (
+        <div className="golden-rules-section">
+          <h3>🛡️ প্রতারণা থেকে বাঁচার শীর্ষ ৫টি গোল্ডেন রুলস (Golden Rules)</h3>
+          <p className="card-sub">ইন্টারনেট না থাকলেও সাধারণ মানুষ এই ৫টি নিয়ম মেনে আর্থিক ক্ষতি থেকে বাঁচতে পারবেন:</p>
+          <div className="golden-rules-grid">
+            {goldenRules.map((rule, i) => (
+              <div key={i} className="card golden-rule-card">
+                <strong>{rule.title}</strong>
+                <p>{rule.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="directory-cards-grid">
+        {filtered.map((h) => (
+          <div key={h.name} className="card directory-card">
+            <div className="dir-card-head">
+              <div>
+                <strong>{h.name}</strong>
+                <span className="bengali-sub">{h.bengaliName}</span>
+              </div>
+              <span className="dir-tag">{h.tag}</span>
+            </div>
+
+            <p className="dir-desc">{h.desc}</p>
+
+            <div className="dir-numbers-strip">
+              <div className="num-block">
+                <small>OFFICIAL HOTLINE</small>
+                <a href={`tel:${h.hotline}`} className="hotline-link">
+                  <PhoneCall size={14} /> {h.hotline}
+                </a>
+              </div>
+              <div className="num-block">
+                <small>USSD / CODE</small>
+                <code>{h.shortcode}</code>
+              </div>
+            </div>
+
+            <div className="dir-foot">
+              <span className="domain-pill">
+                <CheckCircle2 size={13} /> {h.domain}
+              </span>
+              <button
+                type="button"
+                className="copy-btn"
+                onClick={() => {
+                  navigator.clipboard.writeText(h.hotline);
+                  notify(`Copied ${h.hotline} (${h.name}) to clipboard.`);
+                }}
+              >
+                Copy Number
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function HistoryPage(props: Props & { version: number; initialSelection?: ScanResult | null }) {
   const [rows, setRows] = useState<ScanResult[]>([]),
     [query, setQuery] = useState(''),
