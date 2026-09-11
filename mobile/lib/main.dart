@@ -472,6 +472,64 @@ class _WorkspaceState extends State<Workspace> {
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)))
       ]),
       Text('RISK SCORE · ${r['threatType']}', style: TextStyle(fontSize: 12)),
+      SizedBox(height: 14),
+      Container(
+        padding: EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.shield_outlined, size: 16, color: color),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text('🇧🇩 সাধারণ মানুষের জন্য সহজ বাংলা পরামর্শ',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: color)),
+                ),
+              ],
+            ),
+            SizedBox(height: 8),
+            Text(
+              score >= 50
+                  ? '⚠️ ভুয়া বা প্রতারণামূলক ফাঁদ ধরা পড়েছে!'
+                  : score >= 25
+                      ? '⚡ কিছু সন্দেহজনক বিষয় লক্ষ্য করা গেছে'
+                      : '✅ প্রাথমিক পরীক্ষায় বড় কোনো বিপদের লক্ষণ পাওয়া যায়নি',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: Colors.black87),
+            ),
+            SizedBox(height: 4),
+            Text(
+              (r['evidence'] as List).any((e) => e['id'] == 'credentials')
+                  ? 'প্রতারকরা আপনার বিকাশ/নগদ/ব্যাংকের গোপন পিন (PIN), ওটিপি বা পাসওয়ার্ড হাতিয়ে নেওয়ার চেষ্টা করছে। কোনো প্রতিষ্ঠান কখনোই আপনার পিন জানতে চায় না।'
+                  : (r['evidence'] as List).any((e) => (e['id'] as String).startsWith('brand:'))
+                      ? 'আসল ওয়েবসাইটের মতো দেখতে নকল ওয়েবসাইট বানিয়ে প্রতারণা করা হচ্ছে। এটি সম্পূর্ণ অননুমোদিত।'
+                      : (r['evidence'] as List).any((e) => e['id'] == 'prize')
+                          ? 'লটারি বা ফ্রি পুরস্কারের লোভ দেখিয়ে অর্থ বা গোপন পিন হাতিয়ে নেওয়ার প্রতারণার প্যাটার্ন পাওয়া গেছে।'
+                          : score >= 50
+                              ? 'এই লিংকে ক্লিক করবেন না এবং কোনো তথ্য দেবেন না। এটি আর্থিক ক্ষতির কারণ হতে পারে।'
+                              : 'অপ্রত্যাশিত অনুরোধ সতর্কতার সাথে যাচাই করুন এবং কখনোই কারো সাথে ওটিপি শেয়ার করবেন না।',
+              style: TextStyle(fontSize: 12, height: 1.4, color: Colors.black87),
+            ),
+            SizedBox(height: 8),
+            Text('জরুরি হেল্পলাইন: বিকাশ ১৬২৪৭ · নগদ ১৬১৬৭ · পুলিশ ৯৯৯',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: green)),
+          ],
+        ),
+      ),
       Divider(height: 30),
       Text('Why SafeLink is warning you',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
