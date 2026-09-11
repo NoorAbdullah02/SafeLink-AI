@@ -5,7 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 class SafeLinkApi {
   static const defaultBase =
-      String.fromEnvironment('API_URL', defaultValue: 'http://192.168.0.100:3001');
+      String.fromEnvironment('API_URL', defaultValue: 'https://safelink-ai-8q6c.onrender.com');
   final storage = const FlutterSecureStorage();
   String? token;
   String? customBase;
