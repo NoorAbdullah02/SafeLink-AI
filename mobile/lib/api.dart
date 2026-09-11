@@ -26,7 +26,15 @@ class SafeLinkApi {
 
   Future<void> setBaseUrl(String? url) async {
     if (url != null && url.trim().isNotEmpty) {
-      customBase = url.trim().replaceAll(RegExp(r'/+$'), '');
+      var clean = url.trim();
+      if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+        clean = 'https://$clean';
+      }
+      clean = clean.replaceAll(RegExp(r'/+$'), '');
+      if (clean.endsWith('/api')) {
+        clean = clean.substring(0, clean.length - 4);
+      }
+      customBase = clean;
       await storage.write(key: 'api_url', value: customBase!);
     } else {
       customBase = null;
