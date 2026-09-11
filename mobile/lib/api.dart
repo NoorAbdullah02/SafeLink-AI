@@ -15,6 +15,13 @@ class SafeLinkApi {
   Future<void> restore() async {
     token = await storage.read(key: 'session');
     customBase = await storage.read(key: 'api_url');
+    if (customBase != null &&
+        (customBase!.startsWith('http://192.') ||
+            customBase!.startsWith('http://10.') ||
+            customBase!.startsWith('http://localhost'))) {
+      customBase = null;
+      await storage.delete(key: 'api_url');
+    }
   }
 
   Future<void> setBaseUrl(String? url) async {
