@@ -194,6 +194,17 @@ class _WorkspaceState extends State<Workspace> {
     }
   }
 
+  Future<void> changeServerUrl() async {
+    final newUrl = await showDialog<String>(
+        context: context,
+        builder: (_) => ServerDialog(initialUrl: api.base));
+    if (newUrl != null && mounted) {
+      await api.setBaseUrl(newUrl);
+      setState(() => status = 'Connecting to ${api.base}…');
+      await initialize();
+    }
+  }
+
   Widget panel(Widget child) => Card(
       margin: EdgeInsets.only(bottom: 18),
       child: Padding(padding: EdgeInsets.all(22), child: child));
@@ -236,8 +247,25 @@ class _WorkspaceState extends State<Workspace> {
                                         1.15)
                                 : MediaQuery.textScalerOf(context)),
                         child: ListView(padding: EdgeInsets.all(20), children: [
-                          Text(status,
-                              style: TextStyle(fontSize: 12, color: green)),
+                          InkWell(
+                            onTap: changeServerUrl,
+                            borderRadius: BorderRadius.circular(6),
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 4),
+                              child: Row(children: [
+                                Expanded(
+                                  child: Text(status,
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: status.contains('unavailable')
+                                              ? Colors.red
+                                              : green,
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                                Icon(Icons.tune, size: 16, color: green)
+                              ]),
+                            ),
+                          ),
                           SizedBox(height: 22),
                           ...content,
                           if (busy)
@@ -667,6 +695,16 @@ class _WorkspaceState extends State<Workspace> {
                 child: Text('Sign out'))
           ])),
         panel(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          title('Server Connection'),
+          Text('Current API: ${api.base}',
+              style: TextStyle(fontSize: 13, color: Colors.grey)),
+          SizedBox(height: 12),
+          OutlinedButton.icon(
+              onPressed: changeServerUrl,
+              icon: Icon(Icons.dns_outlined),
+              label: Text('Change Server URL')),
+        ])),
+        panel(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           title('Privacy & protection'),
           Text(
               'Images are processed in memory. Raw message and OCR text are not saved in history. External checks are optional and send content to configured providers. Remove sensitive information before scanning.\n\nA low score is not a guarantee of safety. We do not visit suspicious links or follow redirects.\n\nUse the website for community reports and the full threat dashboard.')
@@ -853,4 +891,54 @@ class _AuthPageState extends State<AuthPage> {
                               child: Text('Send password reset email'))
                         ]))
               ]))));
+}
+
+class ServerDialog extends StatefulWidget {
+  final String initialUrl;
+  const ServerDialog({super.key, required this.initialUrl});
+  @override
+  State<ServerDialog> createState() => _ServerDialogState();
+}
+
+class _ServerDialogState extends State<ServerDialog> {
+  late final TextEditingController controller;
+  @override
+  void initState() {
+    super.initState();
+    controller = TextEditingController(text: widget.initialUrl);
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text('Server Settings'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+                'Enter SafeLink API URL (e.g. your PC IP http://192.168.0.100:3001 or deployed Render URL):',
+                style: TextStyle(fontSize: 13)),
+            SizedBox(height: 14),
+            TextField(
+                controller: controller,
+                decoration: InputDecoration(
+                    labelText: 'API URL',
+                    hintText: 'http://192.168.0.100:3001')),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: Text('Save & Connect')),
+        ],
+      );
 }

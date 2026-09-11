@@ -7,3 +7,4 @@ include: package:flutter_lints/flutter.yaml
 linter:
   rules:
     prefer_const_constructors: false
+    use_build_context_synchronously: false
