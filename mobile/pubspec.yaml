@@ -1,0 +1,19 @@
+name: safelink_ai
+description: Explainable digital scam protection for Bangla, Banglish and English.
+publish_to: none
+version: 1.0.0+1
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.4.0
+  flutter_secure_storage: ^9.2.4
+  image_picker: ^1.1.2
+  mobile_scanner: ^7.0.1
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+flutter:
+  uses-material-design: true

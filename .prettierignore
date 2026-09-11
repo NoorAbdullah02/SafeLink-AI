@@ -1,0 +1,7 @@
+node_modules
+dist
+dist-server
+mobile
+work
+pnpm-lock.yaml
+migrations/meta

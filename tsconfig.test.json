@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": false, "outDir": "work/test-build" },
+  "include": ["server", "shared", "tests"],
+  "exclude": ["web"]
+}

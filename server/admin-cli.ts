@@ -1,0 +1,10 @@
+import { createStore } from './store.js';
+const email = process.argv[2]?.toLowerCase();
+if (!email) throw new Error('Usage: pnpm admin account@example.com');
+const store = createStore();
+if (store.memory) throw new Error('Use a persistent database for administrator provisioning.');
+const u = (await store.list('users', { email }))[0];
+if (!u) throw new Error('Register this account first.');
+await store.update('users', u.id, { role: 'admin', verified: true });
+await store.insert('adminLogs', { userId: u.id, action: 'admin:provision-cli', target: u.id });
+console.log('Administrator role granted.');

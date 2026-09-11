@@ -1,0 +1,9 @@
+node_modules
+.git
+.env
+.env.*
+work
+mobile
+dist
+dist-server
+*.log
