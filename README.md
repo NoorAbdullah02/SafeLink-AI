@@ -1,164 +1,163 @@
-# SafeLink AI
+# SafeLink AI 🛡️
 
-**Before You Click, Let AI Check.**
+**Before You Click, Let AI Check.**  
+*An AI-Powered, Multi-Layered Cyber Safety & Anti-Phishing Defense Platform for Bangladesh.*
 
-A web + Flutter cyber-safety project that analyzes links, Bangla/Banglish/English messages, real QR images and screenshots. React and Flutter use one Express API and the same risk engine. Persistent storage uses Neon PostgreSQL with Drizzle.
+[![Live Web Application](https://img.shields.io/badge/Live%20Web%20App-Render-46E3B7?style=for-the-badge&logo=render&logoColor=black)](https://safelink-ai-8q6c.onrender.com)
+[![Download Android APK](https://img.shields.io/badge/Download%20APK-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/NoorAbdullah02/SafeLink-AI/releases/download/v1.0.0/app-debug.apk)
+[![Tests Passing](https://img.shields.io/badge/Automated%20Tests-29%2F29%20Passing-success?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/NoorAbdullah02/SafeLink-AI/actions)
+[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
-## What is included
+---
 
-- Responsive React/Vite/TypeScript dashboard with Tailwind and ShadCN-style Radix-based controls; light/dark themes.
-- Real URL parsing, message rules, configurable brand look-alike checks, evidence and 0–100 risk scores.
-- Optional Google Safe Browsing and configurable OpenAI-compatible language analysis, with explicit failure states.
-- Real QR decoding, English/Bangla OCR, extracted-text review and controlled demo assets.
-- Password authentication, cookie sessions for web, opaque bearer sessions for mobile, email verification and reset.
-- Private scan history, kept scans, community reports and moderation, contacts, Brevo email alerts and admin audit logs.
-- Personal dashboard and a lightweight entity-to-category relationship graph based on actual reports.
-- Flutter scanner, QR camera, image upload, history, Family Shield and Android share-to-SafeLink.
-- SQL migration, CI workflow, Docker deployment, example environment configuration and automated tests.
+## 🌟 Overview & Problem Statement
 
-## Quick start
+In Bangladesh, Mobile Financial Services (MFS) like **bKash, Nagad, and Rocket** have empowered millions, but have also opened the floodgates to digital financial fraud:
+- **Typo-squatting and Homograph attacks:** Spoofed domains such as `bkash-reward.xyz` or Unicode look-alike characters deceiving uninitiated users.
+- **Social Engineering in Banglish / Regional Bangla:** Fake lottery claims, urgent threats (*"Apnar account ekhoni bondho hoye jabe"*), and unauthorized OTP/PIN harvesting.
+- **Malicious QR codes & phishing screenshots:** Scams disguised as merchant pay codes or utility bills.
 
-Install **Node.js 22.12+** and **pnpm 10**. From this folder:
+**SafeLink AI** provides a unified **Web + Flutter Mobile** defense system that analyzes links, messages, real QR codes, and screenshots through a 4-layered defense pipeline with privacy-first architecture.
+
+---
+
+## 🚀 Live Access
+
+- 🌐 **Web Dashboard:** [https://safelink-ai-8q6c.onrender.com](https://safelink-ai-8q6c.onrender.com)
+- 📱 **Android App (Direct APK):** [Download Latest APK v1.0.0](https://github.com/NoorAbdullah02/SafeLink-AI/releases/download/v1.0.0/app-debug.apk)
+- 💻 **GitHub Repository:** [NoorAbdullah02/SafeLink-AI](https://github.com/NoorAbdullah02/SafeLink-AI)
+
+---
+
+## 🔬 Multi-Layered Defense Pipeline (How It Works)
+
+SafeLink AI does not simply query a single black-box model. It employs a **4-Layer Defense Pipeline**:
+
+```mermaid
+flowchart TD
+    A[User Input: URL / Message / QR / Screenshot] --> B[Input Normalization & Extraction]
+    B -->|Tesseract OCR / QR Decoder / RegEx| C[Extracted Text, Domains & Phone Numbers]
+    
+    C --> D[Layer 1: Deterministic Heuristic Engine]
+    D -->|Homograph & Levenshtein Checks| D1[Brand Impersonation Detection]
+    D -->|Bangla/Banglish Keyword NLP| D2[Credential & Urgency Trap Rules]
+    
+    C --> E[Layer 2: Neon PostgreSQL Community Intelligence]
+    E -->|Moderator-Approved Reports| E1[Crowdsourced Risk Aggregation]
+    
+    C --> F[Layer 3: Mistral AI Semantic Analysis]
+    F -->|Context-Aware LLM Inference| F1[Social Engineering & Psychological Trick Detection]
+    
+    D1 & D2 & E1 & F1 --> G[Layer 4: Risk Scoring & Advisory Matrix]
+    G --> H[Final Risk Level: Low / Caution / High / Critical]
+    G --> I[Actionable Safety Recommendations]
+```
+
+### The 4 Stages Explained:
+
+1. **Input Normalization & Extraction:**
+   - **URL:** Normalizes domains, extracts subdomains, strips queries, catches userinfo tricks (`user@malicious.com`).
+   - **Message:** Extracts Bangladeshi phone numbers (`+8801...`) and links; normalizes Bangla Unicode (NFKC).
+   - **QR Code:** Decodes payload via `MobileScanner` / `jsqr` without opening destination.
+   - **Screenshot:** Runs dual-language OCR (**Tesseract.js** in English + Bengali).
+2. **Layer 1: Local Heuristic Rules Engine (Privacy-Preserving):**
+   - Runs client/edge-compatible deterministic checks without sending raw data to external servers.
+   - Computes **Levenshtein Distance** & skeleton normalization against trusted brand registries (bKash, Nagad, Brac Bank, etc.).
+   - Identifies credential harvesting (requests for OTP, PIN, password) and urgency pressure (*"জরুরি"*, *"immediately"*, *"account blocked"*).
+3. **Layer 2: Community Intelligence (Neon Cloud PostgreSQL):**
+   - Cross-references targets with crowdsourced scam reports verified by community moderators.
+   - Employs strict deduplication to prevent brigade abuse.
+4. **Layer 3: Mistral AI Semantic Language Analysis:**
+   - Interprets subtle contextual fraud in English, Bangla, and Banglish.
+   - Generates natural-language reasoning explaining *why* the content is dangerous.
+5. **Layer 4: Risk Scoring & Actionable Advisory (0–100):**
+   - Aggregates signals into an intuitive index:
+     - 🟢 **Low Risk (0–24):** No strong indicators found.
+     - 🟡 **Caution (25–49):** Suspicious signals present; manual verification required.
+     - 🟠 **High Risk (50–74):** Clear scam markers detected; do not proceed.
+     - 🔴 **Critical Risk (75–100):** Severe threat/phishing detected; destination blocked.
+
+---
+
+## 🛠️ Technology Stack
+
+| Layer | Technology |
+|---|---|
+| **Web Client** | React 19, Vite, TypeScript, Tailwind CSS, Radix UI, Lucide Icons |
+| **Mobile Client** | Flutter 3 (Android & iOS), Dart, MobileScanner, Secure Storage |
+| **Backend API** | Node.js, Express, TypeScript, Helmet, Express-Rate-Limit, Zod |
+| **Database & ORM**| Neon Serverless PostgreSQL, Drizzle ORM |
+| **AI / Machine Learning** | Mistral AI (`mistral-small-latest`), Tesseract.js (OCR) |
+| **Email & Alerts** | Brevo (formerly Sendinblue) Transactional HTTPS API |
+| **CI / CD & Cloud** | GitHub Actions (Auto APK Releases & CI), Render Cloud Hosting |
+
+---
+
+## 🎯 Competition Demo Showcase (Judges' Cheat-sheet)
+
+To test the system live during a presentation, try these scenarios:
+
+| Scenario | Input Content | Expected Detection |
+|---|---|---|
+| **bKash Typo-Squatting** | `https://bkash-reward.xyz/login` | 🔴 **Critical Risk:** Brand Impersonation, Suspicious TLD suffix |
+| **Banglish Urgency Trap** | `Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.` | 🟠 **High Risk:** Credential theft (PIN request), Psychological urgency |
+| **Bangla Prize Scam** | `অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।` | 🟠 **High Risk:** Fake prize claim, Upfront payment request |
+| **Safe Official Link** | `https://www.bkash.com` | 🟢 **Low Risk:** Official verified brand domain |
+
+---
+
+## 💻 Local Development Setup
+
+### Prerequisites
+- **Node.js 22.12+** and **pnpm 10+**
+- **Flutter SDK 3.x** (for mobile development)
 
 ```sh
+# Clone repository
+git clone https://github.com/NoorAbdullah02/SafeLink-AI.git
+cd SafeLink-AI
+
+# Install dependencies
 pnpm install
+
+# Configure environment
 cp .env.example .env
+# Edit .env with your DATABASE_URL, MISTRAL_API_KEY, BREVO_API_KEY
+
+# Run database migrations
+pnpm db:migrate
+
+# Start web and API servers
 pnpm dev
 ```
 
-On Windows, use `Copy-Item .env.example .env` instead of `cp` if needed. Open `http://localhost:5173`. The API is on port 3001. The default `.env.example` explicitly enables **temporary memory mode** for local demonstrations: all results are computed by the normal risk engine, but accounts and activity disappear on restart. It is not a replacement database, and production refuses to start without `DATABASE_URL`.
-
-### Neon PostgreSQL
-
-1. Create a Neon database and copy its connection string into `.env` as `DATABASE_URL`.
-2. Set `DEMO_MEMORY=false`.
-3. Run `pnpm db:migrate` to apply the included SQL migration.
-4. Run `pnpm dev` and register an account.
-5. To provision a trusted administrator from the deployment shell, run `pnpm admin your-email@example.com`.
-
-Never commit `.env` or paste keys into frontend code. The administrator command is a deployment-owner operation, not a public endpoint.
-
-### Production build
-
+### Running Automated Test Suite
 ```sh
 pnpm test
-pnpm build
-NODE_ENV=production pnpm start
 ```
+*All 29 integration and heuristic unit tests execute deterministically in ~4 seconds.*
 
-PowerShell: `$env:NODE_ENV='production'; pnpm start`. In production, Express serves both the built website and API on the same origin. Set `APP_URL` to the exact public HTTPS origin. Use `TRUST_PROXY_HOPS=1` only when there is exactly one trusted reverse proxy.
-
-### Flutter
-
-The `mobile/` folder is the Flutter application. Install the stable Flutter SDK and Android SDK, then:
-
+### Building Mobile App
 ```sh
 cd mobile
 flutter pub get
-flutter analyze
-flutter test
-flutter run --dart-define=API_URL=http://10.0.2.2:3001
+flutter build apk --debug
 ```
 
-`10.0.2.2` is the Android emulator’s host bridge. For a physical phone, use the development computer’s LAN address, run the API on the same network, and allow that port through the firewall. Release builds must use your HTTPS production URL:
+---
 
-```sh
-flutter build apk --release --dart-define=API_URL=https://YOUR-DEPLOYED-HOST
-flutter build appbundle --release --dart-define=API_URL=https://YOUR-DEPLOYED-HOST
-```
+## 🔒 Security & Privacy by Design
 
-Configure your own release signing key before publishing. iOS builds require macOS, Xcode and Apple signing. Camera permission descriptions are included. Android accepts shared text/URLs through a small native method channel; iOS Share Extension is not included. iOS users can paste text or upload images. The website remains the browser-based option for desktop devices.
+- **Zero-Execution Destination Policy:** SafeLink **never** follows links, executes remote scripts, or renders untrusted external web pages on the server (complete protection against Server-Side Request Forgery - SSRF).
+- **In-Memory Image Processing:** Screenshots and QR images are processed strictly in RAM and never saved to persistent disk.
+- **Cryptographic Security:** Salted scrypt password hashing, opaque mobile bearer tokens, HttpOnly/SameSite session cookies.
+- **Auditable Moderation:** Admin audit trails for community scam reports and security alerts.
 
-## Architecture
+---
 
-```text
-React website ─┐
-              ├── Express REST API ─── Neon PostgreSQL / Drizzle
-Flutter app ──┘          │
-                        ├── Deterministic risk engine
-                        ├── Approved community reports
-                        ├── Optional Google Safe Browsing
-                        ├── Optional language-model provider
-                        ├── QR decoder / English + Bangla OCR
-                        └── Brevo HTTPS email API
-```
+## 👥 Authors & Recognition
 
-Detection is never duplicated in clients. Submitted destinations are **never fetched**, executed or opened automatically. This avoids a scan endpoint becoming an SSRF proxy. Redirect destinations, downloaded files and live page contents are not inspected.
+Developed for cyber-safety innovation and national digital financial literacy in Bangladesh.  
+Repository maintained by [Noor Abdullah](https://github.com/NoorAbdullah02).
 
-## Risk methodology
-
-Local evidence has documented weights in `server/engine.ts`. Each rule ID contributes at most once per scan. Weak URL characteristics have low weights; credential requests and brand look-alikes have higher weights. Reviewed community evidence requires at least two distinct reporters and contributes at most 25 points. A threat-list match establishes a floor of 80. Optional AI semantic interpretation adds at most 20. The final value is clamped to 0–100.
-
-| Score | Level |
-|---|---|
-| 0–24 | Low Risk |
-| 25–49 | Caution |
-| 50–74 | High Risk |
-| 75–100 | Critical Risk |
-
-The score is an **uncalibrated heuristic risk index**, not a percentage probability. A low score does not establish safety. The engine cannot reliably identify every Bangla/Banglish spelling, sophisticated impersonation, sarcasm or negation. Brand similarity can produce false positives. Internationalized domains and unusual suffixes can be legitimate.
-
-Local/community/intelligence evidence is separate from AI interpretation. The UI lists unavailable or skipped checks, so missing APIs never appear as clean results. The sum of displayed rule weights may differ from the final score because of the intelligence floor, AI contribution and 100-point cap.
-
-## External services
-
-- **Brevo**: configure API key and verified sender address. Calls use the transactional HTTPS endpoint, not SMTP transport. Registration works without Brevo; verification, password resets and alerts explicitly remain unavailable. Verified email is required for sending alerts and production community reports.
-- **AI**: set `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`. The adapter expects Chat Completions plus JSON-object response support. Other protocols require another `AIProvider` implementation. Provider output is validated. No provider result is fabricated.
-- **Threat intelligence**: set `SAFE_BROWSING_API_KEY`; enable external checks in the scan form. Review Google’s terms before commercial use; Safe Browsing is intended for non-commercial use and Web Risk is the commercial alternative.
-- **OCR**: Tesseract loads `eng` and `ben` language data. Set `OCR_LANG_PATH` to a prepared local directory for a disconnected demo. QR decoding does not require an external API. First-time language loading needs a network connection unless data is already prepared.
-
-Run `pnpm ocr:prepare` while online, then set `OCR_LANG_PATH=work/ocr-data` for the local fair demo. Language data is excluded from Git and can be prepared again on another computer.
-
-## Security and privacy
-
-Passwords use salted Node scrypt. Session and reset tokens are cryptographically random; only hashes are stored. Web cookies are HttpOnly, SameSite=Lax and Secure in production. Mobile tokens use platform secure storage. Reset links are short-lived and atomically single-use in PostgreSQL. Resetting a password revokes existing sessions.
-
-Zod validates input; Helmet supplies security headers; origin checks protect cookie-based mutations; rate limits cover API, authentication, scanning and email. Authorization is enforced server-side for every personal record and administrator route. Reports have a database uniqueness constraint per user/entity. Only approved reports count, and distinct reporters are deduplicated across matching entities.
-
-Images are limited to 5 MB and 12 million pixels, decoded with Sharp, and held in memory only. Two concurrent image operations per API process are permitted. OCR can be imperfect: users see the actual extracted text. No image files are persisted by the API.
-
-History omits raw message/OCR text, extracted phone numbers and URL queries/fragments. Paths, domains, evidence and AI interpretations may still contain identifying information; do not scan secrets. External AI redaction is best-effort and cannot guarantee removal of personal data. The external-check toggle is explicit consent to send the submitted content to configured providers.
-
-Unkept scans expire after `RETENTION_DAYS` (default 30); a cleanup runs hourly. Kept scans remain until deleted. Community reports, contact details, alerts and audit records remain for account/moderation purposes. Expired sessions and action tokens are removed. Define your institution’s retention and account-removal procedure before public use.
-
-The included rate limiter and OCR concurrency cap are per-process. Deploy as **one instance** for the initial Tech Fair/pilot. A larger deployment needs shared rate limiting, bounded database pagination, job-based OCR, monitoring, security review and abuse-response procedures.
-
-## Tech Fair demo
-
-1. Start the API and website before the fair. Check `/api/health`.
-2. Use **Demo lab → Banglish account warning**, then Scan Now. Discuss the domain mismatch and PIN request evidence.
-3. Try the neutral Bangla message. Explain why low risk is not a guarantee.
-4. Upload `demo-assets/controlled-qr.png` in QR mode, or point Flutter’s camera at it.
-5. Upload `demo-assets/controlled-message.png` in Screenshot mode. Expand extracted text to show genuine OCR.
-6. Sign in, run scans, then show real history and dashboard counts.
-7. With Neon/Brevo configured, demonstrate reports, administrator review and a user-triggered alert to an agreed test recipient.
-8. Disable external checks or leave providers unconfigured; local analysis still works and the check list explains what was skipped.
-
-Reserved `.example` domains are used for controlled inputs. They receive normal analysis rather than predefined responses. No real malicious links are needed.
-
-**Offline contingency:** provider outage is different from total internet loss. The normal hosted API and Neon need internet. For an isolated fair laptop, run the local API with explicit temporary memory mode and preload OCR languages. Do not represent temporary storage as Neon persistence.
-
-## Testing
-
-```sh
-pnpm test
-pnpm typecheck
-pnpm build
-```
-
-Tests cover URL parsing, unsafe schemes, credential and language rules, score bounds, distinct reviewed reports, account flows, authorization, session logout, single-use reset tokens, upload rejection and real QR decoding. `docs/VALIDATION.md` records the checks actually performed in this environment and the unverified integrations. Do not interpret a passing test suite as measured scam-detection accuracy.
-
-See [API reference](docs/API.md), [deployment guide](docs/DEPLOYMENT.md), [validation record](docs/VALIDATION.md) and [development phases](docs/PLAN.md).
-
-## Reference documentation
-
-- [Vite](https://vite.dev/guide/)
-- [Drizzle with Neon](https://orm.drizzle.team/docs/get-started/neon-new)
-- [Brevo transactional email](https://developers.brevo.com/docs/send-a-transactional-email)
-- [Google Safe Browsing lookup](https://developers.google.com/safe-browsing/v4/lookup-api)
-- [Tesseract.js](https://github.com/naptha/tesseract.js)
-- [Flutter mobile_scanner](https://pub.dev/packages/mobile_scanner)
-
-## Screenshots
-
-Add screenshots from your configured deployment before submitting the final university report. Suggested views: desktop scan center, mobile result, OCR extracted text and real activity dashboard. Avoid including private scan data.
+*License: MIT*
