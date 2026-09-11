@@ -57,12 +57,15 @@ export function createApp(store: Store) {
     rateLimit({ windowMs: 60000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }),
   );
   app.use('/api', (req, res, next) => {
-    if (
-      !['GET', 'HEAD', 'OPTIONS'].includes(req.method) &&
-      req.headers.origin &&
-      !origins.has(req.headers.origin)
-    )
-      return next(fail(403, 'Request origin is not allowed.'));
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin) {
+      const origin = req.headers.origin;
+      const host = req.get('host');
+      const isSameHost = Boolean(host && (origin === `https://${host}` || origin === `http://${host}`));
+      const isMobile = req.headers['x-safelink-client'] === 'mobile';
+      if (!origins.has(origin) && !isSameHost && !isMobile) {
+        return next(fail(403, 'Request origin is not allowed.'));
+      }
+    }
     next();
   });
   app.use('/api', async (req: Authed, _res, next) => {
