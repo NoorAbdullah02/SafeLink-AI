@@ -40,3 +40,8 @@ jobs:
         working-directory: mobile
       - run: flutter build apk --debug
         working-directory: mobile
+      - name: Upload SafeLink AI Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SafeLink-AI-debug-apk
+          path: mobile/build/app/outputs/flutter-apk/app-debug.apk
