@@ -19,6 +19,16 @@ class MainActivity : FlutterActivity() {
             if (call.method == "getInitialText") {
                 result.success(sharedText(intent))
                 intent?.removeExtra(Intent.EXTRA_TEXT)
+            } else if (call.method == "dialNumber") {
+                val number = call.argument<String>("number")
+                if (!number.isNullOrEmpty()) {
+                    val dialIntent = Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:$number"))
+                    dialIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(dialIntent)
+                    result.success(true)
+                } else {
+                    result.error("INVALID_NUMBER", "Phone number is empty", null)
+                }
             } else result.notImplemented()
         }
     }

@@ -125,7 +125,8 @@ export default function App() {
     [notice, setNotice] = useState(''),
     [authOpen, setAuthOpen] = useState(false),
     [refresh, setRefresh] = useState(0),
-    [preset, setPreset] = useState<{ kind: ScanKind; text: string } | null>(null);
+    [preset, setPreset] = useState<{ kind: ScanKind; text: string } | null>(null),
+    [globalPanicOpen, setGlobalPanicOpen] = useState(false);
   const [action] = useState(() => new URLSearchParams(location.search).get('action'));
   useEffect(() => {
     api('/health')
@@ -262,6 +263,15 @@ export default function App() {
             </strong>
           </div>
           <div className="top-actions">
+            <button
+              type="button"
+              className="panic-btn-header"
+              title="জরুরি একাউন্ট ফ্রিজ ও প্রতারণা লক প্রোটোকল"
+              onClick={() => setGlobalPanicOpen(true)}
+            >
+              <ShieldAlert size={15} />
+              <span>🚨 একাউন্ট ফ্রিজ</span>
+            </button>
             <span className={'connection ' + (health?.offline ? 'offline' : '')}>
               <span />
               {!health
@@ -406,6 +416,15 @@ export default function App() {
       {(action === 'verify' || action === 'reset') && (
         <AccountAction action={action} notify={setNotice} />
       )}
+      {globalPanicOpen && (
+        <EmergencyFreezeModal
+          onClose={() => setGlobalPanicOpen(false)}
+          onOpenGd={() => {
+            setGlobalPanicOpen(false);
+            setNotice('কোনো স্ক্যান রেজাল্ট থেকে পুলিশ জিডি তৈরি করতে স্ক্যানারে লিঙ্ক বা মেসেজ চেক করুন।');
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -439,7 +458,8 @@ function Scanner({
     [save, setSave] = useState(true),
     [busy, setBusy] = useState(false),
     [result, setResult] = useState<ScanResult | null>(null),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [clipboardPrompt, setClipboardPrompt] = useState<{ text: string; preview: string; kind: ScanKind } | null>(null);
   useEffect(() => {
     if (preset) {
       setKind(preset.kind);
@@ -447,6 +467,79 @@ function Scanner({
       setResult(null);
     }
   }, [preset]);
+
+  useEffect(() => {
+    const checkClipboard = async () => {
+      try {
+        if (!navigator.clipboard?.readText) return;
+        const clipText = (await navigator.clipboard.readText()).trim();
+        if (!clipText || clipText === text || clipText.length < 5) return;
+        const isUrl =
+          clipText.startsWith('http://') ||
+          clipText.startsWith('https://') ||
+          clipText.startsWith('www.') ||
+          (!clipText.includes('\n') && !clipText.includes(' ') && clipText.includes('.') && clipText.length > 6);
+        const isSuspicious =
+          isUrl ||
+          clipText.includes('বিকাশ') ||
+          clipText.includes('নগদ') ||
+          clipText.includes('bkash') ||
+          clipText.includes('nagad') ||
+          clipText.includes('লটারি') ||
+          clipText.includes('বোনাস') ||
+          clipText.includes('টাকা') ||
+          clipText.toLowerCase().includes('pin') ||
+          clipText.toLowerCase().includes('otp');
+
+        if (isSuspicious) {
+          setClipboardPrompt({
+            text: clipText,
+            preview: clipText.length > 65 ? clipText.slice(0, 65) + '…' : clipText,
+            kind: isUrl ? 'url' : 'message',
+          });
+        }
+      } catch {}
+    };
+    window.addEventListener('focus', checkClipboard);
+    return () => window.removeEventListener('focus', checkClipboard);
+  }, [text]);
+
+  async function pasteAndAutoScan() {
+    try {
+      if (!navigator.clipboard?.readText) {
+        notify('আপনার ব্রাউজারে ক্লিপবোর্ড সরাসরি পড়ার সমর্থন নেই। ইনপুট বক্সে ম্যানুয়ালি পেস্ট করুন।');
+        return;
+      }
+      const clip = (await navigator.clipboard.readText()).trim();
+      if (!clip) {
+        notify('ক্লিপবোর্ডে কোনো টেক্সট পাওয়া যায়নি।');
+        return;
+      }
+      const isUrl =
+        clip.startsWith('http://') ||
+        clip.startsWith('https://') ||
+        clip.startsWith('www.') ||
+        (!clip.includes('\n') && !clip.includes(' ') && clip.includes('.'));
+      const detectedKind: ScanKind = isUrl ? 'url' : 'message';
+      setKind(detectedKind);
+      setText(clip);
+      setClipboardPrompt(null);
+      setBusy(true);
+      setError('');
+      setResult(null);
+      try {
+        const r = await post('/scans', { kind: detectedKind, text: clip, external, save });
+        setResult(r);
+        onScan();
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    } catch {
+      notify('ক্লিপবোর্ড পড়ার অনুমতি দিন অথবা ইনপুট বক্সে ম্যানুয়ালি পেস্ট করুন।');
+    }
+  }
   async function scan(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -508,6 +601,51 @@ function Scanner({
               setFile(null);
             }}
           >
+            {clipboardPrompt && (
+              <div className="clipboard-prompt-card">
+                <div className="clipboard-prompt-info">
+                  <span className="clipboard-icon-badge">
+                    <Copy size={16} />
+                  </span>
+                  <div>
+                    <strong>ক্লিপবোর্ডে কপি করা লিঙ্ক/টেক্সট শনাক্ত হয়েছে:</strong>
+                    <p className="clipboard-prompt-snippet">"{clipboardPrompt.preview}"</p>
+                  </div>
+                </div>
+                <div className="clipboard-prompt-buttons">
+                  <button
+                    type="button"
+                    className="btn-clipboard-quick-scan"
+                    onClick={() => {
+                      const { kind: k, text: t } = clipboardPrompt;
+                      setKind(k);
+                      setText(t);
+                      setClipboardPrompt(null);
+                      setBusy(true);
+                      setError('');
+                      setResult(null);
+                      post('/scans', { kind: k, text: t, external, save })
+                        .then((r) => {
+                          setResult(r);
+                          onScan();
+                        })
+                        .catch((err) => setError((err as Error).message))
+                        .finally(() => setBusy(false));
+                    }}
+                  >
+                    <Zap size={14} /> ⚡ Instant AI Scan
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-clipboard-dismiss"
+                    onClick={() => setClipboardPrompt(null)}
+                    aria-label="Dismiss"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+              </div>
+            )}
             <Tabs.List className="scan-tabs" aria-label="Content type">
               {Object.entries(kindInfo).map(([k, v]) => (
                 <Tabs.Trigger key={k} value={k}>
@@ -595,10 +733,21 @@ function Scanner({
                 <span>
                   <ShieldCheck size={15} /> Links are never opened automatically
                 </span>
-                <Button type="submit" disabled={busy || health?.offline}>
-                  {busy ? <Loader2 className="spin" size={18} /> : <ScanLine size={18} />}{' '}
-                  {busy ? 'Analyzing…' : 'Scan Now'} {!busy && <ArrowRight size={17} />}
-                </Button>
+                <div className="scan-submit-actions">
+                  <button
+                    type="button"
+                    className="btn-paste-autoscan"
+                    onClick={pasteAndAutoScan}
+                    title="ক্লিপবোর্ড থেকে লিঙ্ক বা টেক্সট পেস্ট করে সরাসরি এআই স্ক্যান চালান"
+                  >
+                    <Copy size={15} />
+                    <span>Paste & Scan</span>
+                  </button>
+                  <Button type="submit" disabled={busy || health?.offline}>
+                    {busy ? <Loader2 className="spin" size={18} /> : <ScanLine size={18} />}{' '}
+                    {busy ? 'Analyzing…' : 'Scan Now'} {!busy && <ArrowRight size={17} />}
+                  </Button>
+                </div>
               </div>
             </form>
           </Tabs.Root>
@@ -794,6 +943,7 @@ function Result({
   const [saved, setSaved] = useState(Boolean(r.saved));
   const [reportOpen, setReportOpen] = useState(false);
   const [gdOpen, setGdOpen] = useState(false);
+  const [panicOpen, setPanicOpen] = useState(false);
   const resultRef = useRef<HTMLElement>(null);
   useEffect(() => {
     setSaved(Boolean(r.saved));
@@ -913,6 +1063,26 @@ function Result({
         </div>
       </div>
       <AiPipelineFlow result={r} />
+      {r.score >= 50 && (
+        <div className="emergency-freeze-banner">
+          <div className="emergency-freeze-banner-icon">
+            <ShieldAlert size={28} />
+          </div>
+          <div className="emergency-freeze-banner-content">
+            <strong>🚨 আপনি কি এই লিংকে ভুলবশত পিন বা ওটিপি দিয়ে ফেলেছেন?</strong>
+            <p>
+              আর্থিক ক্ষতি এড়াতে ১ সেকেন্ডও দেরি করবেন না। অবিলম্বে হটলাইনে যোগাযোগ করে একাউন্ট সাময়িক ফ্রিজ করুন অথবা সেলফ-লক প্রোটোকল প্রয়োগ করুন।
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn-emergency-freeze-trigger"
+            onClick={() => setPanicOpen(true)}
+          >
+            <Zap size={14} /> 🚨 জরুরি একাউন্ট ফ্রিজ প্রোটোকল
+          </button>
+        </div>
+      )}
       {r.extractedText && (
         <details className="extracted">
           <summary>Review extracted text</summary>
@@ -942,6 +1112,17 @@ function Result({
           <Scale size={15} />
           ১-ক্লিক পুলিশ জিডি ড্রাফট
         </Button>
+        {r.score >= 50 && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="btn-panic-result"
+            onClick={() => setPanicOpen(true)}
+          >
+            <ShieldAlert size={15} />
+            🚨 জরুরি একাউন্ট ফ্রিজ
+          </Button>
+        )}
         {r.persisted && user ? (
           <>
             <Button
@@ -992,6 +1173,15 @@ function Result({
       )}
       {gdOpen && (
         <PoliceGdModal result={r} onClose={() => setGdOpen(false)} />
+      )}
+      {panicOpen && (
+        <EmergencyFreezeModal
+          onClose={() => setPanicOpen(false)}
+          onOpenGd={() => {
+            setPanicOpen(false);
+            setGdOpen(true);
+          }}
+        />
       )}
     </section>
   );
@@ -1362,6 +1552,152 @@ ${r.evidence.length ? r.evidence.map((e, idx) => `   (${idx + 1}) ${e.title}: ${
           </div>
 
           <pre className="gd-text-preview">{gdText}</pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmergencyFreezeModal({
+  onClose,
+  onOpenGd,
+}: {
+  onClose: () => void;
+  onOpenGd?: () => void;
+}) {
+  const [copiedScript, setCopiedScript] = useState(false);
+  const [copiedNumber, setCopiedNumber] = useState<string | null>(null);
+
+  const emergencyContacts = [
+    { name: 'bKash Limited (বিকাশ)', hotline: '16247', tag: 'MFS Hotdesk', color: '#d12053' },
+    { name: 'Nagad (ডাক বিভাগীয় নগদ)', hotline: '16167', tag: 'Govt MFS', color: '#f26522' },
+    { name: 'Rocket (ডাচ-বাংলা ব্যাংক)', hotline: '16216', tag: 'Bank MFS', color: '#8c2d8c' },
+    { name: 'Upay (ইউসিবি উপায়)', hotline: '16268', tag: 'Fintech', color: '#005696' },
+    { name: 'জাতীয় জরুরি সেবা (পুলিশ)', hotline: '999', tag: 'Police Toll-Free', color: '#d32f2f' },
+    { name: 'বিটিআরসি সাইবার কমপ্লেন', hotline: '100', tag: 'Telecom Fraud', color: '#0288d1' },
+  ];
+
+  const agentScript =
+    'আমার নাম [আপনার নাম], বিকাশ/নগদ/অ্যাকাউন্ট নম্বর [আপনার নম্বর]। একটি ফিশিং প্রতারক চক্র আমাকে বিভ্রান্ত করে গোপন ওটিপি বা পিন সংগ্রহ করেছে। আমার অ্যাকাউন্ট থেকে কোনো অবৈধ লেনদেন বন্ধ করতে অনতিবিলম্বে সকল আউটগোয়িং লেনদেন সাময়িকভাবে স্থগিত (Freeze) করুন এবং সন্দেহজনক ট্রানজেকশন হোল্ড করুন।';
+
+  const copyScript = async () => {
+    try {
+      await navigator.clipboard.writeText(agentScript);
+      setCopiedScript(true);
+      setTimeout(() => setCopiedScript(false), 2500);
+    } catch {}
+  };
+
+  const copyNumber = async (num: string) => {
+    try {
+      await navigator.clipboard.writeText(num);
+      setCopiedNumber(num);
+      setTimeout(() => setCopiedNumber(null), 2500);
+    } catch {}
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal emergency-freeze-modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="Emergency Fraud Account Freeze Protocol"
+      >
+        <div className="report-modal-header emergency-modal-top">
+          <div className="report-modal-title emergency-title">
+            <ShieldAlert size={22} className="panic-icon-spin" />
+            <div>
+              <strong>🚨 জরুরি একাউন্ট ফ্রিজ ও সেলফ-লক প্রোটোকল</strong>
+              <small>Emergency Fraud Account Lock & Protocol</small>
+            </div>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="emergency-modal-body">
+          <div className="emergency-alert-callout">
+            <AlertTriangle size={24} />
+            <div>
+              <strong>১ সেকেন্ডও দেরি করবেন না!</strong>
+              <p>
+                প্রতারকের সাথে কোনো গোপন পিন বা ওটিপি শেয়ার করে থাকলে প্রতারক টাকা ট্রান্সফার করার আগেই নিচের পদক্ষেপগুলো নিন।
+              </p>
+            </div>
+          </div>
+
+          <div className="emergency-section">
+            <h4>ধাপ ১: সরাসরি অফিশিয়াল হটলাইনে ডায়াল করুন (1-Click Dial / Copy)</h4>
+            <div className="emergency-grid">
+              {emergencyContacts.map((c) => (
+                <div key={c.hotline} className="emergency-contact-card" style={{ borderColor: `${c.color}40` }}>
+                  <div className="contact-info">
+                    <strong>{c.name}</strong>
+                    <span className="contact-tag" style={{ color: c.color, backgroundColor: `${c.color}15` }}>
+                      {c.tag}
+                    </span>
+                  </div>
+                  <div className="contact-actions">
+                    <a href={`tel:${c.hotline}`} className="btn-call" style={{ backgroundColor: c.color }}>
+                      <PhoneCall size={14} /> কল {c.hotline}
+                    </a>
+                    <button
+                      type="button"
+                      className="btn-copy-num"
+                      onClick={() => copyNumber(c.hotline)}
+                      title="নম্বর কপি করুন"
+                    >
+                      {copiedNumber === c.hotline ? <Check size={14} color="#19876b" /> : <Copy size={14} />}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="emergency-section self-lock-box">
+            <div className="self-lock-header">
+              <Zap size={18} />
+              <strong>ধাপ ২: তাত্ক্ষণিক সেলফ-লক কৌশল (Instant Self-Lock Hack)</strong>
+            </div>
+            <p>
+              কাস্টমার কেয়ারের লাইনে সিরিয়াল বা ব্যস্ত থাকলে বিকাশ বা নগদ অ্যাপে ঢুকে <strong>ইচ্ছাকৃতভাবে পর পর ৩ বার ভুল পিন (PIN) দিন</strong>।
+            </p>
+            <div className="self-lock-tip">
+              ⚡ ফলাফল: অ্যাপের সিকিউরিটি ইঞ্জিন তাৎক্ষণিকভাবে অ্যাকাউন্ট সাময়িক স্থগিত (Lock) করে দেবে, ফলে প্রতারক অন্য প্রান্তে লগইন থাকা সত্ত্বেও কোনো ক্যাশআউট বা সেন্ড মানি করতে পারবে না!
+            </div>
+          </div>
+
+          <div className="emergency-section">
+            <div className="agent-script-header">
+              <h4>ধাপ ৩: কাস্টমার কেয়ার এজেন্টের সাথে যা বলবেন (Call Script)</h4>
+              <button type="button" className="btn-copy-script" onClick={copyScript}>
+                {copiedScript ? <Check size={14} /> : <Copy size={14} />}
+                {copiedScript ? 'কপি হয়েছে!' : 'স্ক্রিপ্ট কপি করুন'}
+              </button>
+            </div>
+            <div className="agent-script-content">
+              {agentScript}
+            </div>
+          </div>
+
+          {onOpenGd && (
+            <div className="emergency-section police-gd-trigger">
+              <h4>ধাপ ৪: আইনি সহায়তা ও সাধারণ ডায়েরি (Police GD)</h4>
+              <p>ভবিষ্যতের আইনি সুরক্ষা ও টাকা উদ্ধারের আবেদন হিসেবে থানায় জিডি করা বাধ্যতামূলক।</p>
+              <Button
+                className="primary w-full"
+                onClick={() => {
+                  onClose();
+                  onOpenGd();
+                }}
+              >
+                <Scale size={16} /> ১-ক্লিক পুলিশ জিডি ও সাইবার অভিযোগ ড্রাফট তৈরি করুন
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </div>

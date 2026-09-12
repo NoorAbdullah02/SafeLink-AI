@@ -83,7 +83,23 @@ class PipelineStageItem {
   });
 }
 
-class _WorkspaceState extends State<Workspace> {
+class EmergencyContactItem {
+  final String name;
+  final String hotline;
+  final String desc;
+  final Color color;
+  final IconData icon;
+
+  const EmergencyContactItem({
+    required this.name,
+    required this.hotline,
+    required this.desc,
+    required this.color,
+    required this.icon,
+  });
+}
+
+class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   final api = SafeLinkApi();
   final input = TextEditingController();
   static const shareChannel = MethodChannel('safelink/share');
@@ -94,10 +110,100 @@ class _WorkspaceState extends State<Workspace> {
   String kind = 'url', status = 'Connecting…';
   bool external = false, busy = false, simple = false;
   List<dynamic> history = [], contacts = [], alerts = [];
+
+  String _lastCheckedClipboard = '';
+  bool _showClipboardBanner = false;
+  String _clipboardPreview = '';
+  String _clipboardText = '';
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     initialize();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkClipboardOnResume();
+    }
+  }
+
+  Future<void> _checkClipboardOnResume() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text?.trim() ?? '';
+      if (text.isEmpty ||
+          text == _lastCheckedClipboard ||
+          text == input.text.trim()) {
+        return;
+      }
+      final looksLikeUrl = text.startsWith('http://') ||
+          text.startsWith('https://') ||
+          text.startsWith('www.') ||
+          (!text.contains('\n') &&
+              text.contains('.') &&
+              !text.contains(' ') &&
+              text.length > 5);
+      final isLikelyScam = looksLikeUrl ||
+          text.contains('বিকাশ') ||
+          text.contains('নগদ') ||
+          text.contains('bkash') ||
+          text.contains('nagad') ||
+          text.contains('লটারি') ||
+          text.contains('বোনাস') ||
+          text.contains('টাকা') ||
+          text.toLowerCase().contains('pin') ||
+          text.toLowerCase().contains('otp');
+
+      if (isLikelyScam) {
+        _lastCheckedClipboard = text;
+        if (mounted) {
+          setState(() {
+            _showClipboardBanner = true;
+            _clipboardText = text;
+            _clipboardPreview =
+                text.length > 60 ? '${text.substring(0, 60)}…' : text;
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _pasteAndScanFromClipboard() async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text?.trim() ?? '';
+      if (text.isEmpty) {
+        message('ক্লিপবোর্ডে কোনো টেক্সট বা লিঙ্ক নেই।');
+        return;
+      }
+      setState(() {
+        _showClipboardBanner = false;
+        page = 0;
+        kind = text.startsWith('http') ||
+                (!text.contains(' ') && text.contains('.'))
+            ? 'url'
+            : 'message';
+        input.text = text;
+        result = null;
+      });
+      scanText();
+    } catch (_) {
+      message('ক্লিপবোর্ড পড়তে সমস্যা হয়েছে।');
+    }
+  }
+
+  Future<void> _dialPhone(String number) async {
+    try {
+      if (!kIsWeb && Platform.isAndroid) {
+        await shareChannel.invokeMethod('dialNumber', {'number': number});
+        return;
+      }
+    } catch (_) {}
+    Clipboard.setData(ClipboardData(text: number));
+    message('হটলাইন $number কপি হয়েছে। ডায়ালারে পেস্ট করে কল দিন।');
   }
 
   Future<void> initialize() async {
@@ -146,6 +252,7 @@ class _WorkspaceState extends State<Workspace> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     input.dispose();
     shareChannel.setMethodCallHandler(null);
     super.dispose();
@@ -281,6 +388,11 @@ class _WorkspaceState extends State<Workspace> {
             ]),
             actions: [
               IconButton(
+                icon: Icon(Icons.crisis_alert, color: Colors.redAccent),
+                tooltip: '🚨 একাউন্ট ফ্রিজ (Panic Button)',
+                onPressed: showEmergencyFreezeDialog,
+              ),
+              IconButton(
                 icon: Icon(Icons.menu_book_outlined),
                 tooltip: 'অফলাইন ডিরেক্টরি',
                 onPressed: showOfflineDirectoryDialog,
@@ -386,6 +498,107 @@ class _WorkspaceState extends State<Workspace> {
         Text(
             'Check links, বাংলা / Banglish messages, QR codes and screenshots.'),
         SizedBox(height: 22),
+        if (_showClipboardBanner) ...[
+          Card(
+            elevation: 1,
+            color: Colors.amber.shade50,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.amber.shade400, width: 1.2),
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.content_paste_search,
+                          color: Colors.orange.shade800, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'ক্লিপবোর্ডে লিঙ্ক/টেক্সট পাওয়া গেছে!',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Colors.orange.shade900,
+                          ),
+                        ),
+                      ),
+                      InkWell(
+                        onTap: () =>
+                            setState(() => _showClipboardBanner = false),
+                        child: Padding(
+                          padding: EdgeInsets.all(4),
+                          child: Icon(Icons.close,
+                              size: 18, color: Colors.grey.shade700),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.amber.shade200),
+                    ),
+                    child: Text(
+                      _clipboardPreview,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontFamily: 'monospace',
+                          color: Colors.black87),
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () =>
+                            setState(() => _showClipboardBanner = false),
+                        child: Text('উপেক্ষা করুন',
+                            style: TextStyle(
+                                color: Colors.grey.shade700, fontSize: 12)),
+                      ),
+                      SizedBox(width: 8),
+                      FilledButton.icon(
+                        icon: Icon(Icons.bolt, size: 15),
+                        label: Text('⚡ ইনস্ট্যান্ট এআই স্ক্যান',
+                            style: TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.bold)),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.orange.shade800,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _showClipboardBanner = false;
+                            input.text = _clipboardText;
+                            kind = _clipboardText.startsWith('http') ||
+                                    (!_clipboardText.contains(' ') &&
+                                        _clipboardText.contains('.'))
+                                ? 'url'
+                                : 'message';
+                            result = null;
+                          });
+                          scanText();
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SizedBox(height: 12),
+        ],
         panel(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           SegmentedButton<String>(
               showSelectedIcon: false,
@@ -450,21 +663,23 @@ class _WorkspaceState extends State<Workspace> {
                       ),
                       SizedBox(width: 8),
                       ActionChip(
-                        avatar: Icon(Icons.chat_bubble_outline,
-                            size: 16, color: Colors.orange),
-                        label: Text('Banglish PIN Scam'),
-                        onPressed: () => loadDemoScenario('message', 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.'),
+                        avatar: Icon(Icons.sms_failed,
+                            size: 16, color: Colors.orange.shade800),
+                        label: Text('Banglish OTP Phish'),
+                        onPressed: () => loadDemoScenario('message',
+                            'Apnar bkash account block hoyeche. 10 min er moddhe PIN 4421 diye unblock korun: https://bkash-login.help'),
                       ),
                       SizedBox(width: 8),
                       ActionChip(
                         avatar: Icon(Icons.card_giftcard,
-                            size: 16, color: Colors.orange),
-                        label: Text('Bangla Lottery Scam'),
-                        onPressed: () => loadDemoScenario('message', 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।'),
+                            size: 16, color: Colors.amber.shade900),
+                        label: Text('Bangla 50,000 Tk Trap'),
+                        onPressed: () => loadDemoScenario('message',
+                            'অভিনন্দন! আপনি জিতেছেন ৫০,০০০ টাকা! পুরষ্কার পেতে এখনই আপনার বিকাশ পিন ও ওটিপি ভেরিফাই করুন: http://free-reward-bkash.tk'),
                       ),
                       SizedBox(width: 8),
                       ActionChip(
-                        avatar: Icon(Icons.check_circle_outline,
+                        avatar: Icon(Icons.verified_user,
                             size: 16, color: green),
                         label: Text('Official Safe Site'),
                         onPressed: () => loadDemoScenario('url', 'https://www.bkash.com'),
@@ -475,12 +690,29 @@ class _WorkspaceState extends State<Workspace> {
               ],
             ),
           ),
-          FilledButton.icon(
-              onPressed: busy ? null : scanText,
-              icon: Icon(Icons.shield_outlined),
-              label: Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text(busy ? 'Analyzing…' : 'Scan Now'))),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: busy ? null : scanText,
+                  icon: Icon(Icons.shield_outlined),
+                  label: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Text(busy ? 'Analyzing…' : 'Scan Now'),
+                  ),
+                ),
+              ),
+              SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: busy ? null : _pasteAndScanFromClipboard,
+                icon: Icon(Icons.content_paste_go, size: 16),
+                label: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text('Paste & Scan'),
+                ),
+              ),
+            ],
+          ),
           SizedBox(height: 12),
           Text('Links are never opened automatically.',
               textAlign: TextAlign.center, style: TextStyle(fontSize: 12))
@@ -500,6 +732,52 @@ class _WorkspaceState extends State<Workspace> {
               label: Text('Screenshot'))
         ]),
         SizedBox(height: 18),
+        Card(
+          elevation: 0,
+          color: Colors.red.shade50,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.red.shade300, width: 1.2),
+          ),
+          child: InkWell(
+            onTap: showEmergencyFreezeDialog,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.crisis_alert, color: Colors.red.shade700, size: 24),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '🚨 ইমার্জেন্সি একাউন্ট ফ্রিজ (Panic Freeze)',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                            color: Colors.red.shade900,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'ভুলবশত পিন বা ওটিপি শেয়ার করলে দ্রুত একাউন্ট সাময়িক বন্ধের গাইড ও হটলাইন',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.red.shade800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, color: Colors.red.shade700),
+                ],
+              ),
+            ),
+          ),
+        ),
+        SizedBox(height: 10),
         Card(
           elevation: 0,
           color: green.withValues(alpha: 0.08),
@@ -747,6 +1025,59 @@ class _WorkspaceState extends State<Workspace> {
                 style: TextStyle(fontSize: 14)),
             subtitle: Text(c['detail'])),
       _buildAiPipelineFlow(r),
+      if (score >= 50) ...[
+        Container(
+          margin: EdgeInsets.only(top: 14, bottom: 4),
+          padding: EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.red.shade50,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.red.shade400, width: 1.2),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      color: Colors.red.shade700, size: 22),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '🚨 আপনি কি ভুলবশত পিন বা ওটিপি দিয়েছেন?',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Colors.red.shade900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 5),
+              Text(
+                'আর্থিক ক্ষতি এড়াতে ১ সেকেন্ডও দেরি করবেন না। অবিলম্বে হটলাইনে যোগাযোগ করুন অথবা সেলফ-লক প্রোটোকল প্রয়োগ করুন।',
+                style: TextStyle(
+                    fontSize: 11.5, color: Colors.red.shade900, height: 1.35),
+              ),
+              SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  icon: Icon(Icons.shield, size: 16),
+                  label: Text('🚨 একাউন্ট ফ্রিজ ও সেলফ-লক প্রোটোকল খুলুন'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.red.shade800,
+                    foregroundColor: Colors.white,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  onPressed: showEmergencyFreezeDialog,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
       if (r['extractedText'] != null)
         ExpansionTile(title: Text('Review extracted text'), children: [
           Padding(
@@ -775,6 +1106,18 @@ class _WorkspaceState extends State<Workspace> {
         label: Text('১-ক্লিক পুলিশ জিডি ড্রাফট (Police GD)'),
         onPressed: () => showPoliceGdDialog(r),
       ),
+      if (score >= 50) ...[
+        SizedBox(height: 8),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.red.shade800,
+            foregroundColor: Colors.white,
+          ),
+          icon: Icon(Icons.crisis_alert, size: 18),
+          label: Text('🚨 জরুরি একাউন্ট ফ্রিজ ও হটলাইন গাইড'),
+          onPressed: showEmergencyFreezeDialog,
+        ),
+      ],
       SizedBox(height: 10),
       if (r['persisted'] == true)
         Wrap(spacing: 10, children: [
@@ -1461,6 +1804,322 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                         message('জিডি ড্রাফট সফলভাবে ক্লিপবোর্ডে কপি হয়েছে!');
                       },
                     ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void showEmergencyFreezeDialog() {
+    const emergencyContacts = [
+      EmergencyContactItem(
+        name: 'bKash (বিকাশ)',
+        hotline: '16247',
+        desc: 'বিকাশ কাস্টমার কেয়ার হেল্পলাইন',
+        color: Color(0xffd12053),
+        icon: Icons.account_balance_wallet,
+      ),
+      EmergencyContactItem(
+        name: 'Nagad (নগদ)',
+        hotline: '16167',
+        desc: 'ডাক বিভাগীয় ডিজিটাল লেনদেন নগদ',
+        color: Color(0xfff26522),
+        icon: Icons.monetization_on,
+      ),
+      EmergencyContactItem(
+        name: 'Rocket (রকেট / DBBL)',
+        hotline: '16216',
+        desc: 'ডাচ-বাংলা ব্যাংক মোবাইল ব্যাংকিং',
+        color: Color(0xff8c2d8c),
+        icon: Icons.account_balance,
+      ),
+      EmergencyContactItem(
+        name: 'Upay (উপায়)',
+        hotline: '16268',
+        desc: 'ইউসিবি ফিনটেক উপায় হেল্পলাইন',
+        color: Color(0xff005696),
+        icon: Icons.payment,
+      ),
+      EmergencyContactItem(
+        name: 'জাতীয় জরুরি সেবা (999)',
+        hotline: '999',
+        desc: 'বাংলাদেশ পুলিশ সাইবার ইমার্জেন্সি ডেস্ক',
+        color: Color(0xffd32f2f),
+        icon: Icons.local_police,
+      ),
+      EmergencyContactItem(
+        name: 'বিটিআরসি সাইবার ডেস্ক (100)',
+        hotline: '100',
+        desc: 'টেলিকম প্রতারণা ও সিম ফ্রড রিপোর্ট',
+        color: Color(0xff0288d1),
+        icon: Icons.headset_mic,
+      ),
+    ];
+
+    const agentScriptText =
+        'আমার নাম [আপনার নাম], বিকাশ/নগদ/অ্যাকাউন্ট নম্বর [আপনার নম্বর]। একটি ফিশিং প্রতারক চক্র আমাকে বিভ্রান্ত করে গোপন ওটিপি বা পিন সংগ্রহ করেছে। আমার অ্যাকাউন্ট থেকে কোনো অবৈধ লেনদেন বন্ধ করতে অনতিবিলম্বে সকল আউটগোয়িং লেনদেন সাময়িকভাবে স্থগিত (Freeze) করুন এবং সন্দেহজনক ট্রানজেকশন হোল্ড করুন।';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        height: MediaQuery.of(context).size.height * 0.90,
+        decoration: BoxDecoration(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              margin: EdgeInsets.only(top: 12, bottom: 8),
+              width: 44,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade400,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: Row(
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade100,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.shield_rounded,
+                        color: Colors.red.shade700, size: 24),
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'জরুরি একাউন্ট ফ্রিজ প্রোটোকল',
+                          style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade900),
+                        ),
+                        Text(
+                          'Emergency Fraud Account Lock & Protocol',
+                          style: TextStyle(
+                              fontSize: 11, color: Colors.grey.shade700),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.fromLTRB(18, 12, 18, 24),
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border:
+                          Border.all(color: Colors.red.shade300, width: 1.2),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.warning_amber_rounded,
+                            color: Colors.red.shade700, size: 22),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '১ সেকেন্ডও দেরি করবেন না!',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: Colors.red.shade900),
+                              ),
+                              SizedBox(height: 3),
+                              Text(
+                                'প্রতারকের হাতে পিন বা ওটিপি চলে গেলে টাকা অন্য অ্যাকাউন্টে পাঠানোর আগেই নিচের পদক্ষেপগুলো নিন।',
+                                style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: Colors.red.shade800,
+                                    height: 1.35),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Text('ধাপ ১: সরাসরি হেল্পলাইনে কল দিন (ট্যাপ করলেই কল হবে)',
+                      style: TextStyle(
+                          fontSize: 13.5, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 8),
+                  for (final c in emergencyContacts)
+                    Container(
+                      margin: EdgeInsets.only(bottom: 8),
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border:
+                            Border.all(color: c.color.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(c.icon, color: c.color, size: 22),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(c.name,
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13.5)),
+                                Text(c.desc,
+                                    style: TextStyle(
+                                        fontSize: 11, color: Colors.black54)),
+                              ],
+                            ),
+                          ),
+                          FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: c.color,
+                              foregroundColor: Colors.white,
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
+                            ),
+                            icon: Icon(Icons.call, size: 14),
+                            label: Text(c.hotline,
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 13)),
+                            onPressed: () => _dialPhone(c.hotline),
+                          ),
+                        ],
+                      ),
+                    ),
+                  SizedBox(height: 16),
+                  Container(
+                    padding: EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border:
+                          Border.all(color: Colors.amber.shade400, width: 1.2),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.lightbulb_outline,
+                                color: Colors.amber.shade900, size: 20),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'ধাপ ২: তাত্ক্ষণিক সেলফ-লক কৌশল (Instant Self-Lock)',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: Colors.amber.shade900),
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          'কাস্টমার কেয়ারের লাইনে দীর্ঘ সিরিয়াল বা ব্যস্ত থাকলে নিজের বিকাশ/নগদ অ্যাপে গিয়ে ইচ্ছাকৃতভাবে পর পর ৩ বার ভুল পিন (PIN) দিন।',
+                          style: TextStyle(
+                              fontSize: 12, height: 1.4, color: Colors.black87),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          '⚡ ফলাফল: অ্যাপের সিকিউরিটি সিস্টেম অ্যাকাউন্টটিকে সাথে সাথে সাময়িক লক করবে, ফলে প্রতারক অন্য প্রান্তে লগইন থাকা সত্ত্বেও কোনো ক্যাশআউট বা সেন্ড মানি করতে পারবে না!',
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.brown.shade800),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Text('ধাপ ৩: কাস্টমার কেয়ারে যা বলবেন (Agent Call Script)',
+                      style: TextStyle(
+                          fontSize: 13.5, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 6),
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          agentScriptText,
+                          style: TextStyle(
+                              fontSize: 12, height: 1.45, color: Colors.black87),
+                        ),
+                        SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: FilledButton.tonalIcon(
+                            icon: Icon(Icons.copy, size: 14),
+                            label: Text('স্ক্রিপ্ট কপি করুন'),
+                            style: FilledButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            onPressed: () {
+                              Clipboard.setData(
+                                  ClipboardData(text: agentScriptText));
+                              message('কাস্টমার কেয়ার স্ক্রিপ্ট কপি হয়েছে।');
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Text('ধাপ ৪: আইনি সুরক্ষা ও সাধারণ ডায়েরি (GD)',
+                      style: TextStyle(
+                          fontSize: 13.5, fontWeight: FontWeight.bold)),
+                  SizedBox(height: 6),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: green,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    icon: Icon(Icons.gavel_rounded, size: 18),
+                    label: Text('📝 ১-ক্লিক পুলিশ জিডি (GD) ড্রাফট তৈরি করুন'),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      showPoliceGdDialog(result ?? <String, dynamic>{});
+                    },
                   ),
                 ],
               ),
