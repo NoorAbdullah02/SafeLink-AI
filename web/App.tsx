@@ -269,6 +269,16 @@ export default function App() {
           <div className="top-actions">
             <button
               type="button"
+              className="header-assistant-btn"
+              title="সাইবার এআই সহকারী (Ask AI Copilot)"
+              onClick={() => setAssistantOpen(true)}
+            >
+              <Bot size={16} />
+              <span>🤖 সাইবার এআই সহকারী</span>
+              <span className="live-dot-pulse" />
+            </button>
+            <button
+              type="button"
               className="panic-btn-header"
               title="জরুরি একাউন্ট ফ্রিজ ও প্রতারণা লক প্রোটোকল"
               onClick={() => setGlobalPanicOpen(true)}
@@ -321,6 +331,7 @@ export default function App() {
               preset={preset}
               health={health}
               onScan={() => setRefresh((x) => x + 1)}
+              onOpenAssistant={() => setAssistantOpen(true)}
             />
           )}
           {page === 'dashboard' && (
@@ -468,7 +479,13 @@ function Scanner({
   health,
   onScan,
   requireAuth,
-}: Props & { preset: { kind: ScanKind; text: string } | null; health: any; onScan: () => void }) {
+  onOpenAssistant,
+}: Props & {
+  preset: { kind: ScanKind; text: string } | null;
+  health: any;
+  onScan: () => void;
+  onOpenAssistant: () => void;
+}) {
   const [kind, setKind] = useState<ScanKind>('url'),
     [text, setText] = useState(''),
     [file, setFile] = useState<File | null>(null),
@@ -478,6 +495,25 @@ function Scanner({
     [result, setResult] = useState<ScanResult | null>(null),
     [error, setError] = useState(''),
     [clipboardPrompt, setClipboardPrompt] = useState<{ text: string; preview: string; kind: ScanKind } | null>(null);
+
+  const executeDemoScan = async (demoKind: ScanKind, demoText: string) => {
+    setKind(demoKind);
+    setText(demoText);
+    setFile(null);
+    setError('');
+    setBusy(true);
+    setResult(null);
+    document.getElementById('scan-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    try {
+      const r = await post('/scans', { kind: demoKind, text: demoText, external, save });
+      setResult(r);
+      onScan();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   useEffect(() => {
     if (preset) {
       setKind(preset.kind);
@@ -610,6 +646,43 @@ function Scanner({
               <LockKeyhole size={13} /> Private by default
             </span>
           </div>
+
+          <div className="quick-demo-pills-row" aria-label="Quick live test scenarios">
+            <span className="pills-title">⚡ কুইক ডেমো টেস্ট:</span>
+            <button
+              type="button"
+              className="quick-demo-pill danger"
+              onClick={() => executeDemoScan('url', 'https://bkash-reward.xyz/login')}
+              title="bKash Spoof লিংক সরাসরি টেস্ট করুন"
+            >
+              <span>🔗 bKash Spoof</span>
+            </button>
+            <button
+              type="button"
+              className="quick-demo-pill warning"
+              onClick={() => executeDemoScan('message', 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.')}
+              title="Banglish OTP ফিশিং সরাসরি টেস্ট করুন"
+            >
+              <span>💬 Banglish PIN</span>
+            </button>
+            <button
+              type="button"
+              className="quick-demo-pill warning"
+              onClick={() => executeDemoScan('message', 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।')}
+              title="Bangla Lottery প্রতারণা সরাসরি টেস্ট করুন"
+            >
+              <span>🎁 ৫০,০০০ টাকা লটারি</span>
+            </button>
+            <button
+              type="button"
+              className="quick-demo-pill success"
+              onClick={() => executeDemoScan('url', 'https://www.bkash.com')}
+              title="অফিসিয়াল নিরাপদ ওয়েবসাইট টেস্ট করুন"
+            >
+              <span>✅ অফিসিয়াল সাইট</span>
+            </button>
+          </div>
+
           <Tabs.Root
             value={kind}
             onValueChange={(v) => {
@@ -788,18 +861,14 @@ function Scanner({
                 <span className="eyebrow">⚡ 1-CLICK COMPETITION DEMO SCENARIOS</span>
                 <h3>Instant Test Cards (Tap any card to analyze)</h3>
               </div>
-              <span className="demo-badge">4 LIVE SAMPLES</span>
+              <span className="demo-badge">4 LIVE SAMPLES · TAP TO AUTO-SCAN</span>
             </div>
             <div className="demo-cards-grid">
               <button
                 type="button"
                 className="demo-scenario-card danger"
-                onClick={() => {
-                  setKind('url');
-                  setText('https://bkash-reward.xyz/login');
-                  setResult(null);
-                  document.getElementById('scan-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }}
+                onClick={() => executeDemoScan('url', 'https://bkash-reward.xyz/login')}
+                title="Tap to automatically analyze this bKash spoof link"
               >
                 <div className="demo-card-top">
                   <span className="demo-icon-wrap">🔗</span>
@@ -807,18 +876,14 @@ function Scanner({
                 </div>
                 <strong>bKash Spoof Link</strong>
                 <p className="demo-preview">https://bkash-reward.xyz/login</p>
-                <span className="demo-action">Test Scenario →</span>
+                <span className="demo-action">⚡ টেস্ট করুন ও অটো-স্ক্যান চালান →</span>
               </button>
 
               <button
                 type="button"
                 className="demo-scenario-card warning"
-                onClick={() => {
-                  setKind('message');
-                  setText('Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.');
-                  setResult(null);
-                  document.getElementById('scan-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }}
+                onClick={() => executeDemoScan('message', 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.')}
+                title="Tap to automatically analyze this Banglish OTP scam"
               >
                 <div className="demo-card-top">
                   <span className="demo-icon-wrap">💬</span>
@@ -826,18 +891,14 @@ function Scanner({
                 </div>
                 <strong>Banglish PIN Scam</strong>
                 <p className="demo-preview">Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.</p>
-                <span className="demo-action">Test Scenario →</span>
+                <span className="demo-action">⚡ টেস্ট করুন ও অটো-স্ক্যান চালান →</span>
               </button>
 
               <button
                 type="button"
                 className="demo-scenario-card warning"
-                onClick={() => {
-                  setKind('message');
-                  setText('অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।');
-                  setResult(null);
-                  document.getElementById('scan-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }}
+                onClick={() => executeDemoScan('message', 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।')}
+                title="Tap to automatically analyze this lottery trap"
               >
                 <div className="demo-card-top">
                   <span className="demo-icon-wrap">🎁</span>
@@ -845,18 +906,14 @@ function Scanner({
                 </div>
                 <strong>Bangla Lottery Scam</strong>
                 <p className="demo-preview">অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।</p>
-                <span className="demo-action">Test Scenario →</span>
+                <span className="demo-action">⚡ টেস্ট করুন ও অটো-স্ক্যান চালান →</span>
               </button>
 
               <button
                 type="button"
                 className="demo-scenario-card success"
-                onClick={() => {
-                  setKind('url');
-                  setText('https://www.bkash.com');
-                  setResult(null);
-                  document.getElementById('scan-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }}
+                onClick={() => executeDemoScan('url', 'https://www.bkash.com')}
+                title="Tap to automatically analyze this verified safe domain"
               >
                 <div className="demo-card-top">
                   <span className="demo-icon-wrap">✅</span>
@@ -864,12 +921,45 @@ function Scanner({
                 </div>
                 <strong>Official Safe Site</strong>
                 <p className="demo-preview">https://www.bkash.com</p>
-                <span className="demo-action">Test Scenario →</span>
+                <span className="demo-action">⚡ টেস্ট করুন ও অটো-স্ক্যান চালান →</span>
               </button>
             </div>
           </div>
+
+          <div className="assistant-showcase-banner" onClick={onOpenAssistant} role="button" tabIndex={0}>
+            <div className="assistant-showcase-left">
+              <div className="assistant-showcase-icon">
+                <Bot size={28} />
+                <span className="status-ping-dot" />
+              </div>
+              <div className="assistant-showcase-info">
+                <span className="showcase-eyebrow">২৪/৭ সাইবার নিরাপত্তা বিশেষজ্ঞ · AI COPILOT</span>
+                <h4>অনলাইনে কোনো মেসেজ, কল বা লিঙ্ক নিয়ে সন্দেহ হচ্ছে?</h4>
+                <p>আমাদের সাইবার এআই সহকারী বিকাশ/নগদ পিন স্ক্যাম, ফেসবুক হ্যাক, ব্ল্যাকমেইল বা জিডি করার নিয়মে মুহূর্তেই সঠিক দিকনির্দেশনা দেয়।</p>
+              </div>
+            </div>
+            <button type="button" className="btn-showcase-chat" onClick={(e) => { e.stopPropagation(); onOpenAssistant(); }}>
+              <Sparkles size={16} />
+              <span>এআই সহকারীর সাথে চ্যাট করুন</span>
+              <ArrowRight size={16} />
+            </button>
+          </div>
         </section>
         <aside className="scan-side">
+          <div className="card assistant-sidebar-card" onClick={onOpenAssistant} role="button" tabIndex={0}>
+            <div className="assistant-sidebar-top">
+              <span className="bot-sidebar-avatar"><Bot size={24} /></span>
+              <span className="sidebar-live-tag">২৪/৭ এক্টিভ</span>
+            </div>
+            <h3>🤖 সাইবার এআই সহকারী</h3>
+            <p>প্রতারণার শিকার হলে বা আইনি পরামর্শের জন্য সরাসরি এআই এক্সপার্টের সাথে কথা বলুন।</p>
+            <button type="button" className="btn-sidebar-ask" onClick={(e) => { e.stopPropagation(); onOpenAssistant(); }}>
+              <Sparkles size={14} />
+              <span>চ্যাট শুরু করুন</span>
+              <ArrowRight size={14} />
+            </button>
+          </div>
+
           <div className="dark-card">
             <span className="outline-icon">
               <ShieldCheck size={26} />

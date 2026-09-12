@@ -402,6 +402,14 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
                 constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                icon: Icon(Icons.smart_toy_outlined, color: green, size: 20),
+                tooltip: '🤖 সাইবার এআই সহকারী (Live AI Copilot)',
+                onPressed: () => showCyberAssistantBottomSheet(),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
                 icon: Icon(Icons.crisis_alert, color: Colors.redAccent, size: 20),
                 tooltip: '🚨 একাউন্ট ফ্রিজ (Panic Button)',
                 onPressed: showEmergencyFreezeDialog,
@@ -501,10 +509,10 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                               style: TextStyle(fontSize: 12))
                         ]))))),
         floatingActionButton: FloatingActionButton(
-          backgroundColor: Colors.blue.shade700,
+          backgroundColor: green,
           foregroundColor: Colors.white,
           tooltip: 'সাইবার এআই সহকারী (AI Copilot)',
-          onPressed: showCyberAssistantBottomSheet,
+          onPressed: () => showCyberAssistantBottomSheet(),
           child: Icon(Icons.smart_toy_outlined, size: 26),
         ),
         bottomNavigationBar: NavigationBar(
@@ -708,13 +716,13 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.content_paste_go, size: 14, color: Colors.blue.shade800),
+                            Icon(Icons.content_paste_go, size: 14, color: green),
                             SizedBox(width: 4),
                             Text('Paste & Scan',
                                 style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.blue.shade800)),
+                                    color: green)),
                           ],
                         ),
                       ),
@@ -769,12 +777,12 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
           SizedBox(height: 8),
           FilledButton.tonalIcon(
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.blue.shade50,
-              foregroundColor: Colors.blue.shade900,
-              side: BorderSide(color: Colors.blue.shade300, width: 1.2),
+              backgroundColor: green.withValues(alpha: 0.12),
+              foregroundColor: green,
+              side: BorderSide(color: green.withValues(alpha: 0.4), width: 1.2),
             ),
             onPressed: busy ? null : _pasteAndScanFromClipboard,
-            icon: Icon(Icons.content_paste_go, size: 18, color: Colors.blue.shade800),
+            icon: Icon(Icons.content_paste_go, size: 18, color: green),
             label: Padding(
               padding: EdgeInsets.symmetric(vertical: 10),
               child: FittedBox(
@@ -804,178 +812,48 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
               icon: Icon(Icons.image_outlined),
               label: Text('Screenshot'))
         ]),
-        SizedBox(height: 18),
-        Card(
-          elevation: 0,
-          color: Colors.red.shade50,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.red.shade300, width: 1.2),
-          ),
-          child: InkWell(
-            onTap: showEmergencyFreezeDialog,
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  Icon(Icons.crisis_alert, color: Colors.red.shade700, size: 24),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '🚨 ইমার্জেন্সি একাউন্ট ফ্রিজ (Panic Freeze)',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13,
-                            color: Colors.red.shade900,
-                          ),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          'ভুলবশত পিন বা ওটিপি শেয়ার করলে দ্রুত একাউন্ট সাময়িক বন্ধের গাইড ও হটলাইন',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.red.shade800,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Icon(Icons.chevron_right, color: Colors.red.shade700),
-                ],
-              ),
-            ),
-          ),
-        ),
-        SizedBox(height: 10),
-        Card(
-          elevation: 0,
-          color: Colors.blue.shade50,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.blue.shade300, width: 1.2),
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: showCyberAssistantBottomSheet,
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(
-                children: [
-                  Container(
-                    padding: EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade700,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.smart_toy_outlined, color: Colors.white, size: 20),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '🤖 সাইবার এআই সহকারী (AI Copilot)',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13,
-                            color: Colors.blue.shade900,
-                          ),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          'বিকাশ/নগদ পিন ফ্রড, একাউন্ট হ্যাক বা জিডি সংক্রান্ত প্রশ্ন করুন',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.blue.shade800,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Icon(Icons.chevron_right, color: Colors.blue.shade700),
-                ],
-              ),
-            ),
-          ),
-        ),
-        SizedBox(height: 10),
-        Card(
-          elevation: 0,
-          color: green.withValues(alpha: 0.08),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: green.withValues(alpha: 0.3)),
-          ),
-          child: InkWell(
-            onTap: showOfflineDirectoryDialog,
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  Icon(Icons.menu_book, color: green, size: 24),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('📖 অফলাইন হেল্পলাইন ও সাইবার সেফটি ডিরেক্টরি',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                                color: green)),
-                        SizedBox(height: 2),
-                        Text(
-                            'ইন্টারনেট ছাড়াই বিকাশ, নগদ, পুলিশ ও ব্যাংকের ভেরিফাইড নম্বর ও গাইড',
-                            style: TextStyle(
-                                fontSize: 11, color: Colors.black87)),
-                      ],
-                    ),
-                  ),
-                  Icon(Icons.chevron_right, color: green),
-                ],
-              ),
-            ),
-          ),
-        ),
         SizedBox(height: 14),
         if (result != null) resultPanel(result!),
-                if (result == null) ...[
+        if (result == null) ...[
           Container(
             padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
               color: green.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: green.withValues(alpha: 0.3)),
+              border: Border.all(color: green.withValues(alpha: 0.35)),
             ),
             child: Row(
               children: [
-                Icon(Icons.flash_on, color: green, size: 18),
+                Icon(Icons.flash_on, color: green, size: 20),
                 SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    '1-TAP COMPETITION DEMO SCENARIOS',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: green,
-                      letterSpacing: 0.5,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '1-CLICK COMPETITION DEMO SCENARIOS',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: green,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      Text(
+                        'Instant Test Cards (Tap any card to analyze)',
+                        style: TextStyle(fontSize: 11, color: Colors.black54),
+                      ),
+                    ],
                   ),
                 ),
                 Container(
-                  padding: EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: green,
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    '4 LIVE',
+                    '4 LIVE SAMPLES',
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
@@ -986,16 +864,11 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
               ],
             ),
           ),
-          SizedBox(height: 10),
-          Text(
-            'Tap any card below to instantly load and run analysis in the AI engine:',
-            style: TextStyle(fontSize: 12, color: Colors.black54),
-          ),
           SizedBox(height: 12),
           _demoScenarioCard(
             icon: Icons.link,
             color: Colors.red,
-            title: '🔗 bKash Spoof Link',
+            title: 'bKash Spoof Link',
             tag: 'HOMOGRAPH SPOOF',
             preview: 'https://bkash-reward.xyz/login',
             onTap: () => loadDemoScenario('url', 'https://bkash-reward.xyz/login'),
@@ -1003,15 +876,15 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
           _demoScenarioCard(
             icon: Icons.chat_bubble_outline,
             color: Colors.deepOrange,
-            title: '💬 Banglish PIN Scam',
+            title: 'Banglish PIN Scam',
             tag: 'BANGLISH OTP',
             preview: 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.',
             onTap: () => loadDemoScenario('message', 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.'),
           ),
           _demoScenarioCard(
             icon: Icons.card_giftcard,
-            color: Colors.orange,
-            title: '🎁 Bangla Lottery Scam',
+            color: Colors.orange.shade800,
+            title: 'Bangla Lottery Scam',
             tag: 'BANGLA LOTTERY',
             preview: 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।',
             onTap: () => loadDemoScenario('message', 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।'),
@@ -1019,10 +892,164 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
           _demoScenarioCard(
             icon: Icons.check_circle_outline,
             color: green,
-            title: '✅ Official Safe Site',
+            title: 'Official Safe Site',
             tag: 'VERIFIED SAFE',
             preview: 'https://www.bkash.com',
             onTap: () => loadDemoScenario('url', 'https://www.bkash.com'),
+          ),
+          SizedBox(height: 14),
+          Card(
+            elevation: 0,
+            color: green.withValues(alpha: 0.08),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: green.withValues(alpha: 0.35), width: 1.2),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => showCyberAssistantBottomSheet(),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: green,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.smart_toy_outlined, color: Colors.white, size: 20),
+                        ),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '🤖 সাইবার এআই সহকারী (Live AI Copilot)',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                  color: Color(0xFF10212C),
+                                ),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'বিকাশ/নগদ পিন ফ্রড, একাউন্ট হ্যাক বা আইনি সহায়তায় সরাসরি কথা বলুন',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.chevron_right, color: green),
+                      ],
+                    ),
+                    SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        _assistantQuickPromptChip('বিকাশ পিন ফ্রড'),
+                        _assistantQuickPromptChip('ফেসবুক হ্যাক উদ্ধার'),
+                        _assistantQuickPromptChip('পুলিশ জিডি গাইড'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          SizedBox(height: 10),
+          Card(
+            elevation: 0,
+            color: Colors.red.shade50,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.red.shade300, width: 1.2),
+            ),
+            child: InkWell(
+              onTap: showEmergencyFreezeDialog,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.crisis_alert, color: Colors.red.shade700, size: 24),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '🚨 ইমার্জেন্সি একাউন্ট ফ্রিজ (Panic Freeze)',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                              color: Colors.red.shade900,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'ভুলবশত পিন বা ওটিপি শেয়ার করলে দ্রুত একাউন্ট সাময়িক বন্ধের গাইড ও হটলাইন',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.red.shade800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right, color: Colors.red.shade700),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          SizedBox(height: 10),
+          Card(
+            elevation: 0,
+            color: green.withValues(alpha: 0.08),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: green.withValues(alpha: 0.3)),
+            ),
+            child: InkWell(
+              onTap: showOfflineDirectoryDialog,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.menu_book, color: green, size: 24),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('📖 অফলাইন হেল্পলাইন ও সাইবার সেফটি ডিরেক্টরি',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                  color: green)),
+                          SizedBox(height: 2),
+                          Text(
+                              'ইন্টারনেট ছাড়াই বিকাশ, নগদ, পুলিশ ও ব্যাংকের ভেরিফাইড নম্বর ও গাইড',
+                              style: TextStyle(
+                                  fontSize: 11, color: Colors.black87)),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right, color: green),
+                  ],
+                ),
+              ),
+            ),
           ),
           SizedBox(height: 12),
           panel(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2331,13 +2358,13 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
     };
   }
 
-  void showCyberAssistantBottomSheet() {
+  void showCyberAssistantBottomSheet([String? initialPrompt]) {
     final chatMessages = <Map<String, dynamic>>[
       {
         'id': 'welcome',
         'role': 'assistant',
         'text':
-            '👋 নমস্কার! আমি SafeLink সাইবার এআই সহকারী (Cyber Copilot)।\n\nঅনলাইন সাইবার নিরাপত্তা, ওটিপি/পিন প্রতারণা প্রতিরোধ, ফেসবুক একাউন্ট উদ্ধার এবং পুলিশি জিডি সংক্রান্ত যেকোনো পরামর্শের জন্য আমি প্রস্তুত।\n\nনিচের প্রশ্নে ট্যাপ করুন অথবা আপনার সমস্যা লিখুন:',
+            '👋 নমস্কার! আমি SafeLink সাইবার এআই সহকারী (Cyber Copilot)।\n\nঅনলাইন সাইবার নিরাপত্তা, ওটিপি/পিন প্রতারণা প্রতিরোধ, ফেসবুক একাউন্ট উদ্ধার এবং পুলিশি জিডি সংক্রান্ত যেকোনো সহায়তায় আমি প্রস্তুত।\n\nনিচের বিষয়ে ট্যাপ করুন অথবা আপনার প্রশ্ন লিখুন:',
         'time': 'এখন',
         'suggestions': [
           'বিকাশ/নগদ পিন কেউ চাইলে কি করব?',
@@ -2361,6 +2388,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
         final textController = TextEditingController();
         final scrollController = ScrollController();
         bool isTyping = false;
+        bool initialSent = false;
 
         return StatefulBuilder(
           builder: (bottomSheetContext, setModalState) {
@@ -2440,21 +2468,32 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
               scrollToBottom();
             }
 
+            if (initialPrompt != null && !initialSent) {
+              initialSent = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                sendUserMessage(initialPrompt);
+              });
+            }
+
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            final sheetBg = isDark ? Color(0xFF0F1C24) : Colors.white;
+
             return Container(
               height: MediaQuery.of(context).size.height * 0.88,
               decoration: BoxDecoration(
-                color: Theme.of(context).scaffoldBackgroundColor,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                color: sheetBg,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                border: Border(top: BorderSide(color: green.withValues(alpha: 0.35), width: 1.5)),
               ),
               child: Column(
                 children: [
                   Container(
                     margin: EdgeInsets.only(top: 10, bottom: 6),
-                    width: 40,
-                    height: 4,
+                    width: 44,
+                    height: 4.5,
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade400,
-                      borderRadius: BorderRadius.circular(2),
+                      color: isDark ? Colors.white24 : Colors.black12,
+                      borderRadius: BorderRadius.circular(3),
                     ),
                   ),
                   Padding(
@@ -2462,7 +2501,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                     child: Row(
                       children: [
                         CircleAvatar(
-                          backgroundColor: Colors.blue.shade700,
+                          backgroundColor: green,
                           radius: 18,
                           child: Icon(Icons.smart_toy_outlined,
                               color: Colors.white, size: 20),
@@ -2477,12 +2516,12 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                                 style: TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.blue.shade900),
+                                    color: isDark ? Colors.white : Color(0xFF10212C)),
                               ),
                               Text(
-                                'Cyber Safety Copilot · ২৪/৭ সক্রিয় এআই বিশেষজ্ঞ',
+                                'Cyber Safety Copilot · Mistral AI Powered · ২৪/৭ সক্রিয়',
                                 style: TextStyle(
-                                    fontSize: 11, color: Colors.grey.shade600),
+                                    fontSize: 11, color: isDark ? Color(0xFFA7F3D0) : green),
                               ),
                             ],
                           ),
@@ -2494,7 +2533,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                       ],
                     ),
                   ),
-                  Divider(height: 1),
+                  Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12),
                   Expanded(
                     child: ListView.builder(
                       controller: scrollController,
@@ -2515,10 +2554,10 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                             children: [
                               if (!isUser) ...[
                                 CircleAvatar(
-                                  radius: 13,
-                                  backgroundColor: Colors.blue.shade100,
+                                  radius: 14,
+                                  backgroundColor: green.withValues(alpha: 0.15),
                                   child: Icon(Icons.smart_toy_outlined,
-                                      size: 14, color: Colors.blue.shade900),
+                                      size: 15, color: green),
                                 ),
                                 SizedBox(width: 8),
                               ],
@@ -2528,16 +2567,17 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                                       horizontal: 14, vertical: 10),
                                   decoration: BoxDecoration(
                                     color: isUser
-                                        ? Colors.blue.shade700
-                                        : (Theme.of(context).brightness ==
-                                                Brightness.dark
-                                            ? Colors.grey.shade800
-                                            : Colors.grey.shade100),
-                                    borderRadius: BorderRadius.circular(14),
+                                        ? green
+                                        : (isDark
+                                            ? Color(0xFF142430)
+                                            : Color(0xFFF1F5F9)),
+                                    borderRadius: BorderRadius.circular(16),
                                     border: isUser
                                         ? null
                                         : Border.all(
-                                            color: Colors.grey.shade300),
+                                            color: isDark
+                                                ? green.withValues(alpha: 0.25)
+                                                : Colors.black12),
                                   ),
                                   child: Column(
                                     crossAxisAlignment:
@@ -2547,11 +2587,10 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                                         msg['text'] ?? '',
                                         style: TextStyle(
                                           fontSize: 13,
-                                          height: 1.4,
+                                          height: 1.45,
                                           color: isUser
                                               ? Colors.white
-                                              : (Theme.of(context).brightness ==
-                                                      Brightness.dark
+                                              : (isDark
                                                   ? Colors.white
                                                   : Colors.black87),
                                         ),
@@ -2567,14 +2606,17 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                                             return ActionChip(
                                               visualDensity:
                                                   VisualDensity.compact,
+                                              backgroundColor: green.withValues(alpha: 0.12),
+                                              side: BorderSide(color: green.withValues(alpha: 0.3)),
                                               avatar: Icon(Icons.phone_in_talk,
                                                   size: 13,
-                                                  color: Colors.blue.shade800),
+                                                  color: green),
                                               label: Text('$name: $num',
                                                   style: TextStyle(
                                                       fontSize: 11,
                                                       fontWeight:
-                                                          FontWeight.bold)),
+                                                          FontWeight.bold,
+                                                      color: green)),
                                               onPressed: () =>
                                                   _dialPhone(num.toString()),
                                             );
@@ -2600,7 +2642,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                           SizedBox(
                             width: 14,
                             height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(strokeWidth: 2, color: green),
                           ),
                           SizedBox(width: 8),
                           Text('এআই সহকারী পরামর্শ বিশ্লেষণ করছে…',
@@ -2623,12 +2665,15 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                             padding: EdgeInsets.only(right: 6),
                             child: ActionChip(
                               visualDensity: VisualDensity.compact,
+                              backgroundColor: green.withValues(alpha: 0.08),
+                              side: BorderSide(color: green.withValues(alpha: 0.25)),
                               avatar: Icon(Icons.auto_awesome,
-                                  size: 13, color: Colors.blue.shade700),
+                                  size: 13, color: green),
                               label: Text(s.toString(),
                                   style: TextStyle(
                                       fontSize: 11.5,
-                                      fontWeight: FontWeight.w600)),
+                                      fontWeight: FontWeight.w600,
+                                      color: green)),
                               onPressed: () =>
                                   sendUserMessage(s.toString()),
                             ),
@@ -2636,7 +2681,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                         }).toList(),
                       ),
                     ),
-                  Divider(height: 1),
+                  Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12),
                   Padding(
                     padding: EdgeInsets.fromLTRB(14, 8, 14, 16),
                     child: Row(
@@ -2652,12 +2697,20 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(20),
                               ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                borderSide: BorderSide(color: green, width: 1.5),
+                              ),
                             ),
                             onSubmitted: (_) => sendUserMessage(),
                           ),
                         ),
                         SizedBox(width: 8),
                         IconButton.filled(
+                          style: IconButton.styleFrom(
+                            backgroundColor: green,
+                            foregroundColor: Colors.white,
+                          ),
                           icon: Icon(Icons.send, size: 18),
                           onPressed: () => sendUserMessage(),
                         ),
@@ -2956,6 +3009,23 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
     scanText();
   }
 
+  Widget _assistantQuickPromptChip(String promptText) => ActionChip(
+        visualDensity: VisualDensity.compact,
+        padding: EdgeInsets.symmetric(horizontal: 4),
+        avatar: Icon(Icons.auto_awesome, size: 12, color: green),
+        backgroundColor: green.withValues(alpha: 0.08),
+        side: BorderSide(color: green.withValues(alpha: 0.25)),
+        label: Text(
+          promptText,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: green,
+          ),
+        ),
+        onPressed: () => showCyberAssistantBottomSheet(promptText),
+      );
+
   Widget _demoScenarioCard({
     required IconData icon,
     required Color color,
@@ -2969,9 +3039,9 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
         margin: EdgeInsets.only(bottom: 12),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: color.withValues(alpha: 0.35), width: 1.2),
+          side: BorderSide(color: color.withValues(alpha: 0.45), width: 1.4),
         ),
-        color: color.withValues(alpha: 0.04),
+        color: Colors.white,
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(12),
@@ -2980,38 +3050,46 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 4,
                   children: [
-                    Container(
-                      padding: EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(icon, size: 18, color: color),
-                    ),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(icon, size: 18, color: color),
                         ),
-                      ),
+                        SizedBox(width: 8),
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF10212C),
+                          ),
+                        ),
+                      ],
                     ),
                     Container(
                       padding:
                           EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.15),
+                        color: color.withValues(alpha: 0.16),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
                         tag,
                         style: TextStyle(
                           fontSize: 10,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w800,
                           color: color,
                         ),
                       ),
@@ -3022,9 +3100,9 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                 Container(
                   width: double.infinity,
                   padding:
-                      EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: Color(0xFFF8FAFC),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: Colors.black12),
                   ),
@@ -3041,15 +3119,37 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                 ),
                 SizedBox(height: 8),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Tap to Test Scenario →',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: color,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.bolt, size: 14, color: color),
+                        SizedBox(width: 3),
+                        Text(
+                          '১-ট্যাপ অটো-স্ক্যান',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Test Scenario',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: color,
+                          ),
+                        ),
+                        SizedBox(width: 2),
+                        Icon(Icons.arrow_forward_rounded, size: 14, color: color),
+                      ],
                     ),
                   ],
                 ),

@@ -149,9 +149,7 @@ export function getCyberExpertResponse(userMessage: string): AssistantResponse {
     text.includes('job') ||
     text.includes('টেলিগ্রাম') ||
     text.includes('telegram') ||
-    text.includes('টাস্ক') ||
-    text.includes('বিনিয়োগ') ||
-    text.includes('লাভ')
+    text.includes('টাস্ক')
   ) {
     return {
       reply: `⚠️ **অনলাইন লটারি, ফেক চাকরি ও টেলিগ্রাম টাস্ক প্রতারণার ফাঁদ:**\n\n• **সাধারণ প্রতারণার ধরন:** প্রতারকরা টেলিগ্রাম বা হোয়াটসঅ্যাপে যোগাযোগ করে ইউটিউব ভিডিও লাইক দেওয়া বা রিভিউ দেওয়ার বিনিময়ে প্রতিদিন ১,০০০–৩,০০০ টাকা আয়ের লোভ দেখায়। প্রথমে ছোট অংক দিয়ে বিশ্বাস অর্জন করে, পরবর্তীতে "ভিআইপি টাস্ক" বা "ডিপোজিট" এর নামে ৫০,০০০ থেকে কয়েক লাখ টাকা হাতিয়ে নেয়।\n• **লটারি প্রতারণা:** কোনো লটারির টিকিট না কেটে কোনো পুরস্কার পাওয়া সম্ভব নয়! "প্রসেসিং ফি" বা "ট্যাক্স" এর নামে কোনো টাকা পাঠাবেন না।\n• **সুরক্ষা নিয়ম:** কোনো বৈধ প্রতিষ্ঠান কাজের জন্য অগ্রিম টাকা চায় না। সন্দেহজনক লিংক SafeLink AI স্ক্যানারে পেস্ট করে পরীক্ষা করুন।`,
@@ -167,9 +165,80 @@ export function getCyberExpertResponse(userMessage: string): AssistantResponse {
     };
   }
 
+  // 7. Malicious APK / Fake App Installation Threats
+  if (
+    text.includes('apk') ||
+    text.includes('অ্যাপ') ||
+    text.includes('install') ||
+    text.includes('ডাউনলোড') ||
+    text.includes('ফাইল পাঠিয়েছে')
+  ) {
+    return {
+      reply: `🛑 **বিপজ্জনক এপিকে (APK) বা ফাইল সংক্রান্ত সতর্কতা:**\n\n• **কখনো অচেনা APK ফাইল ইনস্টল করবেন না:** হোয়াটসঅ্যাপ বা মেসেঞ্জারে আসা কোনো ফাইল (যেমন: *bkash_update.apk*, *police_notice.apk* ইত্যাদি) কখনোই ফোনে ইন্সটল করবেন না। এটি একটি ম্যালওয়্যার/ট্রোজান যা আপনার ফোনের ওটিপি ও মেসেজ চুরি করে হ্যাকারের কাছে পাঠিয়ে দেয়।\n• **ইতোমধ্যে ইনস্টল করে থাকলে করণীয়:**\n  ১. অবিলম্বে ফোনের ইন্টারনেট (WiFi ও মোবাইল ডাটা) বন্ধ করুন এবং ফোনটি **Flight Mode** করুন।\n  ২. ফোনের Settings > Apps-এ গিয়ে সন্দেহজনক অ্যাপটি আনইনস্টল করুন।\n  ৩. অন্য নিরাপদ ডিভাইস থেকে দ্রুত আপনার বিকাশ/নগদ/ফেসবুকের পাসওয়ার্ড পরিবর্তন করুন।`,
+      suggestions: [
+        'ফোনে ম্যালওয়্যার ঢুকলে কীভাবে রিমুভ করব?',
+        'বিকাশ একাউন্ট সাময়িক সেলফ-লক করার উপায় কি?',
+        'অফিশিয়াল গুগল প্লে স্টোর ছাড়া অ্যাপ নামালে কী ক্ষতি?',
+      ],
+      hotlines: [
+        { name: 'CID Cyber Police', number: '01320000888', tag: 'Malware Help' },
+        { name: 'National Emergency', number: '999', tag: 'Emergency' },
+      ],
+    };
+  }
+
+  // 8. Fake Courier / Parcel / Delivery SMS Scams
+  if (
+    text.includes('পার্সেল') ||
+    text.includes('parcel') ||
+    text.includes('কুরিয়ার') ||
+    text.includes('courier') ||
+    text.includes('ডেলিভারি') ||
+    text.includes('সুন্দরবন') ||
+    text.includes('রেডএক্স') ||
+    text.includes('পাঠাও')
+  ) {
+    return {
+      reply: `📦 **ফেক কুরিয়ার ও পার্সেল এসএমএস প্রতারণা সতর্কতা:**\n\n• **প্রতারণার কৌশল:** আপনাকে এসএমএস দিয়ে বলা হয়— *"আপনার একটি পার্সেল আটকে আছে, ঠিকানা আপডেট করতে বা ২০-৫০ টাকা ডেলিভারি ফি দিতে লিংকে যান।"*\n• **আসল উদ্দেশ্য:** লিংকে ঢুকলে হুবহু ব্যাংক বা বিকাশ পেমেন্ট গেটওয়ের মতো ভুয়া ফিশিং পেজ খুলে যায় এবং আপনার কার্ড বা পিন চুরি করা হয়।\n• **নিরাপদ পদক্ষেপ:** কোনো ডেলিভারি মেসেজের লিংকে না ঢুকে সরাসরি সংশ্লিষ্ট কুরিয়ারের অফিশিয়াল নম্বরে ফোন দিয়ে ট্র্যাকিং আইডি যাচাই করুন।`,
+      suggestions: [
+        'পার্সেল ফিশিং লিংক SafeLink দিয়ে কীভাবে স্ক্যান করব?',
+        'ভুল করে পিন দিলে সাথে সাথে কী করতে হবে?',
+        'বিটিআরসিতে প্রতারক সিম ব্লক করব কীভাবে?',
+      ],
+      hotlines: [
+        { name: 'BTRC Cyber Helpline', number: '100', tag: 'Telecom' },
+        { name: 'National Emergency', number: '999', tag: 'Police' },
+      ],
+    };
+  }
+
+  // 9. Crypto, Forex & High-Return Investment Scams
+  if (
+    text.includes('crypto') ||
+    text.includes('ক্রিপ্টো') ||
+    text.includes('ট্রেডিং') ||
+    text.includes('trading') ||
+    text.includes('বিনিয়োগ') ||
+    text.includes('মুনাফা') ||
+    text.includes('forex')
+  ) {
+    return {
+      reply: `📈 **অনলাইন ট্রেডিং ও ভুয়া ইনভেস্টমেন্ট প্রতারণা সতর্কতা:**\n\n• **আইনি বিধান:** বাংলাদেশে বাংলাদেশ ব্যাংক কর্তৃক অনুমোদনহীন যেকোনো ক্রিপ্টোকারেন্সি (Bitcoin, USDT ইত্যাদি) বা ফরেক্স ট্রেডিং প্ল্যাটফর্ম সম্পূর্ণ অবৈধ এবং এর মাধ্যমে অর্থপাচার মানিলন্ডারিং প্রতিরোধ আইনে শাস্তিযোগ্য অপরাধ।\n• **প্রতারণার ফাঁদ:** অনলাইনে "প্রতিদিন ১০০০ টাকা দিলে ২০০০ টাকা লাভ" এমন কোনো বৈধ ব্যবসা নেই। এগুলো পঞ্জি স্কিম বা পিরামিড জালিয়াতি।\n• **করণীয়:** কোনো অজানা বিদেশি বা দেশি অ্যাপে টাকা বা ক্রিপ্টো ডিপোজিট করবেন না। কোনো প্রতারক চক্রের খপ্পরে পড়লে সিআইডি সাইবার পুলিশকে জানান।`,
+      suggestions: [
+        'অনলাইন ইনভেস্টমেন্ট স্ক্যাম কীভাবে শনাক্ত করব?',
+        'টাকা খোয়া গেলে জিডি করার সঠিক নিয়ম কি?',
+        'সিআইডি ফিন্যান্সিয়াল ক্রাইম ইউনিটে যোগাযোগ কীভাবে করব?',
+      ],
+      hotlines: [
+        { name: 'CID Financial Crime', number: '01320000888', tag: 'CID Desk' },
+        { name: 'National Police Emergency', number: '999', tag: '24/7 Police' },
+      ],
+    };
+  }
+
   // Default / Open Knowledge Base Advisor
   return {
-    reply: `👋 **নমস্কার! আমি SafeLink সাইবার এআই সহকারী (Cyber Copilot)।**\n\nআমি আপনাকে অনলাইন সাইবার নিরাপত্তা, ফিশিং লিংক শনাক্তকরণ, আর্থিক প্রতারণা প্রতিরোধ এবং আইনি পদক্ষেপে সাহায্য করতে প্রস্তুত।\n\n🛡️ **দ্রুত কিছু জরুরি সাইবার পরামর্শ:**\n• যে কোনো সন্দেহজনক মেসেজ বা লিঙ্ক আমাদের হোমপেজের **SafeLink AI স্ক্যানারে** পেস্ট করে পরীক্ষা করে নিন।\n• কখনোই কারো সাথে নিজের পিন (PIN), পাসওয়ার্ড বা ওটিপি (OTP) শেয়ার করবেন না।\n• অপ্রত্যাশিত লটারি বা অফার পেলে আগে যাচাই করুন।\n\nআপনার যেকোনো সাইবার সমস্যা বা প্রশ্ন নিচে বাংলায় বা ইংরেজিতে লিখুন!`,
+    reply: `👋 **নমস্কার! আমি SafeLink সাইবার এআই সহকারী (Cyber Copilot)।**\n\nআমি আপনাকে অনলাইন সাইবার নিরাপত্তা, ফিশিং লিংক শনাক্তকরণ, আর্থিক প্রতারণা প্রতিরোধ এবং আইনি পদক্ষেপে শতভাগ নির্ভুল পরামর্শ দিতে প্রস্তুত।\n\n🛡️ **দ্রুত কিছু জরুরি সাইবার পরামর্শ:**\n• যে কোনো সন্দেহজনক মেসেজ বা লিঙ্ক আমাদের হোমপেজের **SafeLink AI স্ক্যানারে** পেস্ট করে পরীক্ষা করে নিন।\n• কখনোই কারো সাথে নিজের পিন (PIN), পাসওয়ার্ড বা ওটিপি (OTP) শেয়ার করবেন না।\n• অপ্রত্যাশিত লটারি বা অফার পেলে আগে যাচাই করুন।\n\nআপনার যেকোনো সাইবার সমস্যা বা প্রশ্ন নিচে বাংলায় বা বাংলিশে লিখুন!`,
     suggestions: [
       'বিকাশ/নগদ পিন কেউ চাইলে কি করব?',
       'আমার একাউন্ট হ্যাক হলে দ্রুত কি করব?',
@@ -205,12 +274,12 @@ export async function askCyberAssistant(
         },
         body: JSON.stringify({
           model,
-          temperature: 0.3,
+          temperature: 0.2,
           messages: [
             {
               role: 'system',
               content:
-                'You are SafeLink AI Cyber Safety Assistant, a friendly and authoritative Bangladeshi cybersecurity and digital law expert. Answer in clear, empathetic, practical Bangla. Advise user on digital safety, bKash/Nagad MFS fraud, account hacking, and legal steps. Keep advice structured with bullet points. Suggest official hotlines (bKash 16247, Nagad 16167, Police 999, BTRC 100, CID 01320000888).',
+                'You are SafeLink AI Cyber Safety Assistant, a polite, authoritative, 100% accurate Bangladeshi cybersecurity and digital law expert. STRICT RULES: Never hallucinate or give vague advice. Never recommend paying scammers, unofficial tools, or unauthorized recovery hackers. Give structured, step-by-step practical Bangla guidance. Emphasize that MFS (bKash/Nagad) NEVER asks for PIN/OTP. Mention official hotlines accurately: bKash (16247), Nagad (16167), Police (999), BTRC (100), CID Cyber Police (01320000888), Police Cyber Support for Women (01320000888).',
             },
             {
               role: 'user',
