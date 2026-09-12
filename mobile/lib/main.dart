@@ -289,12 +289,24 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   }
 
   Future<void> scanText() async {
-    if (input.text.trim().isEmpty) {
+    final raw = input.text.trim();
+    if (raw.isEmpty) {
       message('Paste a link or message first.');
       return;
     }
+    var targetKind = kind;
+    final isUrl = raw.startsWith('http://') ||
+        raw.startsWith('https://') ||
+        (!raw.contains(' ') && !raw.contains('\n') && raw.contains('.'));
+    if (!isUrl && targetKind == 'url') {
+      targetKind = 'message';
+      if (mounted) setState(() => kind = 'message');
+    } else if (isUrl && targetKind == 'message' && !raw.contains(' ') && !raw.contains('\n')) {
+      targetKind = 'url';
+      if (mounted) setState(() => kind = 'url');
+    }
     await action(() async {
-      final data = await api.scan(input.text.trim(), kind, external);
+      final data = await api.scan(raw, targetKind, external);
       if (mounted) setState(() => result = data);
     });
   }
@@ -668,6 +680,32 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
               minLines: 3,
               maxLines: 7,
               maxLength: 10000,
+              buildCounter: (context,
+                      {required currentLength,
+                      required isFocused,
+                      maxLength}) =>
+                  null,
+              onChanged: (val) {
+                final trimmed = val.trim();
+                if (trimmed.isNotEmpty) {
+                  final looksLikeUrl = trimmed.startsWith('http://') ||
+                      trimmed.startsWith('https://') ||
+                      (!trimmed.contains(' ') &&
+                          !trimmed.contains('\n') &&
+                          trimmed.contains('.'));
+                  if (looksLikeUrl && kind != 'url') {
+                    setState(() => kind = 'url');
+                  } else if (!looksLikeUrl &&
+                      trimmed.contains(' ') &&
+                      kind != 'message') {
+                    setState(() => kind = 'message');
+                  } else {
+                    setState(() {});
+                  }
+                } else {
+                  setState(() {});
+                }
+              },
               decoration: InputDecoration(
                   labelText:
                       kind == 'url' ? 'Link to analyze' : 'Message to analyze',
@@ -675,16 +713,32 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                   hintText: kind == 'url'
                       ? 'https://example.com'
                       : 'Paste your message…',
-                  suffixIcon: Padding(
-                    padding: EdgeInsets.only(right: 6, top: 4),
-                    child: IconButton(
-                      tooltip: 'Paste & Scan from Clipboard',
-                      icon: Icon(Icons.content_paste_go, color: green),
-                      onPressed: busy ? null : _pasteAndScanFromClipboard,
-                    ),
+                  suffixIcon: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (input.text.isNotEmpty)
+                        IconButton(
+                          tooltip: 'Clear text',
+                          icon: Icon(Icons.clear,
+                              color: Colors.grey.shade600, size: 20),
+                          onPressed: () {
+                            setState(() {
+                              input.clear();
+                              result = null;
+                            });
+                          },
+                        ),
+                      IconButton(
+                        tooltip: 'Paste & Scan from Clipboard',
+                        icon: Icon(Icons.content_paste_go, color: green),
+                        onPressed: busy ? null : _pasteAndScanFromClipboard,
+                      ),
+                    ],
                   ))),
           SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              activeThumbColor: green,
+              activeTrackColor: green.withValues(alpha: 0.35),
               title: Text('External AI & threat checks',
                   style: TextStyle(fontSize: 15)),
               subtitle: Text(
@@ -692,82 +746,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                   style: TextStyle(fontSize: 12)),
               value: external,
               onChanged: (v) => setState(() => external = v)),
-          Padding(
-            padding: EdgeInsets.only(bottom: 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    Text('⚡ Quick Demo Scenarios:',
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.grey.shade700)),
-                    InkWell(
-                      onTap: busy ? null : _pasteAndScanFromClipboard,
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.content_paste_go, size: 14, color: green),
-                            SizedBox(width: 4),
-                            Text('Paste & Scan',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: green)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: 6),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      ActionChip(
-                        avatar: Icon(Icons.link, size: 16, color: Colors.red),
-                        label: Text('bKash Spoof Link'),
-                        onPressed: () => loadDemoScenario('url', 'https://bkash-reward.xyz/login'),
-                      ),
-                      SizedBox(width: 8),
-                      ActionChip(
-                        avatar: Icon(Icons.sms_failed,
-                            size: 16, color: Colors.orange.shade800),
-                        label: Text('Banglish OTP Phish'),
-                        onPressed: () => loadDemoScenario('message',
-                            'Apnar bkash account block hoyeche. 10 min er moddhe PIN 4421 diye unblock korun: https://bkash-login.help'),
-                      ),
-                      SizedBox(width: 8),
-                      ActionChip(
-                        avatar: Icon(Icons.card_giftcard,
-                            size: 16, color: Colors.amber.shade900),
-                        label: Text('Bangla 50,000 Tk Trap'),
-                        onPressed: () => loadDemoScenario('message',
-                            'অভিনন্দন! আপনি জিতেছেন ৫০,০০০ টাকা! পুরষ্কার পেতে এখনই আপনার বিকাশ পিন ও ওটিপি ভেরিফাই করুন: http://free-reward-bkash.tk'),
-                      ),
-                      SizedBox(width: 8),
-                      ActionChip(
-                        avatar: Icon(Icons.verified_user,
-                            size: 16, color: green),
-                        label: Text('Official Safe Site'),
-                        onPressed: () => loadDemoScenario('url', 'https://www.bkash.com'),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+          SizedBox(height: 10),
           FilledButton.icon(
               onPressed: busy ? null : scanText,
               icon: Icon(Icons.shield_outlined),
