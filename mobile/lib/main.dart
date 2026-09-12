@@ -2889,7 +2889,9 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                       kind = 'message';
                       input.text =
                           'Apnar bKash account bondho! Ekhoni https://bkash-verify.example e PIN din.';
+                      result = null;
                     });
+                    scanText();
                   },
                 ),
               ),
