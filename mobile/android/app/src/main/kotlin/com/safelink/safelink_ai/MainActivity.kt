@@ -7,18 +7,41 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var channel: MethodChannel? = null
-    private fun sharedText(intent: Intent?): String? =
-        if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain")
-            intent.getStringExtra(Intent.EXTRA_TEXT)?.take(10000)
-        else null
+    private fun sharedText(intent: Intent?): String? {
+        if (intent == null) return null
+        // 1. Process Text context menu action
+        if (intent.action == Intent.ACTION_PROCESS_TEXT) {
+            val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+            if (!text.isNullOrBlank()) return text.take(10000)
+        }
+        // 2. Standard Android Share Sheet (ACTION_SEND)
+        if (intent.action == Intent.ACTION_SEND) {
+            val extraText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (!extraText.isNullOrBlank()) return extraText.take(10000)
+
+            val clipData = intent.clipData
+            if (clipData != null && clipData.itemCount > 0) {
+                val clipText = clipData.getItemAt(0)?.coerceToText(this)?.toString()
+                if (!clipText.isNullOrBlank()) return clipText.take(10000)
+            }
+        }
+        // 3. Direct URL or URI data
+        if (intent.action == Intent.ACTION_VIEW) {
+            val uriString = intent.dataString
+            if (!uriString.isNullOrBlank()) return uriString.take(10000)
+        }
+        return null
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "safelink/share")
         channel?.setMethodCallHandler { call, result ->
             if (call.method == "getInitialText") {
-                result.success(sharedText(intent))
+                val text = sharedText(intent)
+                result.success(text)
                 intent?.removeExtra(Intent.EXTRA_TEXT)
+                intent?.removeExtra(Intent.EXTRA_PROCESS_TEXT)
             } else if (call.method == "dialNumber") {
                 val number = call.argument<String>("number")
                 if (!number.isNullOrEmpty()) {
@@ -38,5 +61,6 @@ class MainActivity : FlutterActivity() {
         setIntent(intent)
         sharedText(intent)?.let { channel?.invokeMethod("sharedText", it) }
         intent.removeExtra(Intent.EXTRA_TEXT)
+        intent.removeExtra(Intent.EXTRA_PROCESS_TEXT)
     }
 }

@@ -207,6 +207,19 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   }
 
   Future<void> initialize() async {
+    if (!kIsWeb && Platform.isAndroid) {
+      shareChannel.setMethodCallHandler((call) async {
+        if (call.method == 'sharedText') {
+          receiveText(call.arguments as String?, autoScan: true);
+        }
+      });
+      try {
+        final initial = await shareChannel.invokeMethod<String>('getInitialText');
+        if (initial != null && initial.trim().isNotEmpty) {
+          receiveText(initial, autoScan: true);
+        }
+      } catch (_) {}
+    }
     try {
       await api.restore();
       final health = await api.call('/health');
@@ -223,14 +236,6 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             ? 'Temporary demo · data resets on restart'
             : 'Connected to SafeLink');
       }
-      if (!kIsWeb && Platform.isAndroid) {
-        shareChannel.setMethodCallHandler((call) async {
-          if (call.method == 'sharedText') {
-            receiveText(call.arguments as String?);
-          }
-        });
-        receiveText(await shareChannel.invokeMethod<String>('getInitialText'));
-      }
     } catch (_) {
       if (mounted) {
         setState(() => status = 'Backend unavailable. Check connection.');
@@ -238,16 +243,22 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     }
   }
 
-  void receiveText(String? text) {
-    if (text == null || text.isEmpty || !mounted) return;
+  void receiveText(String? text, {bool autoScan = false}) {
+    if (text == null || text.trim().isEmpty || !mounted) return;
+    final trimmed = text.trim();
     setState(() {
       page = 0;
-      kind = text.trim().startsWith('http') && !text.trim().contains(' ')
+      kind = trimmed.startsWith('http') && !trimmed.contains(' ')
           ? 'url'
           : 'message';
-      input.text = text;
+      input.text = trimmed;
       result = null;
+      _showClipboardBanner = false;
     });
+    if (autoScan) {
+      message('অন্য অ্যাপ থেকে লিঙ্ক/মেসেজ শেয়ার হয়েছে — এআই স্ক্যান শুরু হচ্ছে…');
+      scanText();
+    }
   }
 
   @override
@@ -648,7 +659,15 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                   alignLabelWithHint: true,
                   hintText: kind == 'url'
                       ? 'https://example.com'
-                      : 'Paste your message…')),
+                      : 'Paste your message…',
+                  suffixIcon: Padding(
+                    padding: EdgeInsets.only(right: 6, top: 4),
+                    child: IconButton(
+                      tooltip: 'Paste & Scan from Clipboard',
+                      icon: Icon(Icons.content_paste_go, color: Colors.blue.shade700),
+                      onPressed: busy ? null : _pasteAndScanFromClipboard,
+                    ),
+                  ))),
           SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: Text('External AI & threat checks',
@@ -663,11 +682,34 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('⚡ Quick Demo Scenarios:',
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.grey.shade700)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('⚡ Quick Demo Scenarios:',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.grey.shade700)),
+                    InkWell(
+                      onTap: busy ? null : _pasteAndScanFromClipboard,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        child: Row(
+                          children: [
+                            Icon(Icons.content_paste_go, size: 14, color: Colors.blue.shade800),
+                            SizedBox(width: 4),
+                            Text('Paste & Scan',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue.shade800)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 SizedBox(height: 6),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -714,12 +756,20 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                   padding: EdgeInsets.all(12),
                   child: Text(busy ? 'Analyzing…' : 'Scan Now'))),
           SizedBox(height: 8),
-          OutlinedButton.icon(
+          FilledButton.tonalIcon(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.blue.shade50,
+              foregroundColor: Colors.blue.shade900,
+              side: BorderSide(color: Colors.blue.shade300, width: 1.2),
+            ),
             onPressed: busy ? null : _pasteAndScanFromClipboard,
-            icon: Icon(Icons.content_paste_go, size: 16),
+            icon: Icon(Icons.content_paste_go, size: 18, color: Colors.blue.shade800),
             label: Padding(
-              padding: EdgeInsets.symmetric(vertical: 10),
-              child: Text('Paste & Auto-Scan from Clipboard'),
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                '📋 Paste & Auto-Scan from Clipboard',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
             ),
           ),
           SizedBox(height: 12),

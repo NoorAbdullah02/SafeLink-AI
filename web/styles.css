@@ -3343,6 +3343,42 @@ body { background: var(--bg); color: var(--text); }
   color: #fde68a;
 }
 
+/* Input Label Row & Quick Paste Button */
+.input-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.btn-paste-quick {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1d4ed8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-paste-quick:hover {
+  background: #dbeafe;
+  border-color: #3b82f6;
+  transform: translateY(-1px);
+}
+[data-theme='dark'] .btn-paste-quick {
+  background: #1e293b;
+  border-color: #3b82f6;
+  color: #93c5fd;
+}
+[data-theme='dark'] .btn-paste-quick:hover {
+  background: #1e3a8a;
+  color: #ffffff;
+}
+
 /* Quick Paste & Scan button in scan submit */
 .scan-submit-actions {
   display: flex;
@@ -3352,20 +3388,33 @@ body { background: var(--bg); color: var(--text); }
 .btn-paste-autoscan {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  background: var(--bg-card, #ffffff);
-  border: 1px solid var(--line, #e5e7eb);
+  gap: 7px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1.5px solid #3b82f6;
   border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text, #1f2937);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #1d4ed8;
   cursor: pointer;
+  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.15);
   transition: all 0.15s ease;
 }
 .btn-paste-autoscan:hover {
-  background: var(--bg-hover, #f3f4f6);
-  border-color: #9ca3af;
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  border-color: #2563eb;
+  color: #1e40af;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(59, 130, 246, 0.25);
+}
+[data-theme='dark'] .btn-paste-autoscan {
+  background: linear-gradient(135deg, #1e293b 0%, #172554 100%);
+  border-color: #3b82f6;
+  color: #93c5fd;
+}
+[data-theme='dark'] .btn-paste-autoscan:hover {
+  background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+  color: #ffffff;
 }
 
 /* Emergency Fraud Warning Banner in Scan Result */

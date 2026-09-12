@@ -655,15 +655,28 @@ function Scanner({
               ))}
             </Tabs.List>
             <form onSubmit={scan}>
-              <label className="input-label" htmlFor="scan-input">
-                {kind === 'url'
-                  ? 'Link to analyze'
-                  : kind === 'message'
-                    ? 'Message to analyze'
-                    : kind === 'qr'
-                      ? 'QR code image'
-                      : 'Screenshot to analyze'}
-              </label>
+              <div className="input-label-row">
+                <label className="input-label" htmlFor="scan-input">
+                  {kind === 'url'
+                    ? 'Link to analyze'
+                    : kind === 'message'
+                      ? 'Message to analyze'
+                      : kind === 'qr'
+                        ? 'QR code image'
+                        : 'Screenshot to analyze'}
+                </label>
+                {(kind === 'url' || kind === 'message') && (
+                  <button
+                    type="button"
+                    className="btn-paste-quick"
+                    onClick={pasteAndAutoScan}
+                    title="ক্লিপবোর্ড থেকে সরাসরি পেস্ট ও এআই স্ক্যান করুন"
+                  >
+                    <Copy size={13} />
+                    <span>📋 Paste & Scan</span>
+                  </button>
+                )}
+              </div>
               {kind === 'url' || kind === 'message' ? (
                 <div className={'scan-input ' + (kind === 'message' ? 'message' : '')}>
                   <span>{kind === 'url' ? <Link size={19} /> : <MessageSquare size={19} />}</span>
@@ -740,8 +753,8 @@ function Scanner({
                     onClick={pasteAndAutoScan}
                     title="ক্লিপবোর্ড থেকে লিঙ্ক বা টেক্সট পেস্ট করে সরাসরি এআই স্ক্যান চালান"
                   >
-                    <Copy size={15} />
-                    <span>Paste & Scan</span>
+                    <Copy size={16} />
+                    <span>📋 Paste & Scan</span>
                   </button>
                   <Button type="submit" disabled={busy || health?.offline}>
                     {busy ? <Loader2 className="spin" size={18} /> : <ScanLine size={18} />}{' '}
