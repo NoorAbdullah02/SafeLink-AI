@@ -388,12 +388,18 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             ]),
             actions: [
               IconButton(
-                icon: Icon(Icons.crisis_alert, color: Colors.redAccent),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                icon: Icon(Icons.crisis_alert, color: Colors.redAccent, size: 20),
                 tooltip: '🚨 একাউন্ট ফ্রিজ (Panic Button)',
                 onPressed: showEmergencyFreezeDialog,
               ),
               IconButton(
-                icon: Icon(Icons.menu_book_outlined),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                icon: Icon(Icons.menu_book_outlined, size: 20),
                 tooltip: 'অফলাইন ডিরেক্টরি',
                 onPressed: showOfflineDirectoryDialog,
               ),
@@ -401,16 +407,19 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                 alignment: Alignment.center,
                 children: [
                   IconButton(
-                    icon: Icon(Icons.notifications_outlined),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                    icon: Icon(Icons.notifications_outlined, size: 20),
                     tooltip: 'Security Notifications',
                     onPressed: showNotificationsDialog,
                   ),
                   if (unreadNotifications > 0)
                     Positioned(
-                      top: 10,
-                      right: 10,
+                      top: 4,
+                      right: 4,
                       child: Container(
-                        padding: EdgeInsets.all(4),
+                        padding: EdgeInsets.all(3),
                         decoration: BoxDecoration(
                           color: Colors.red,
                           shape: BoxShape.circle,
@@ -419,7 +428,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                           '$unreadNotifications',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 9,
+                            fontSize: 8,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -428,7 +437,14 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                 ],
               ),
               if (user == null)
-                TextButton(onPressed: login, child: Text('Sign in'))
+                TextButton(
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                  ),
+                  onPressed: login,
+                  child: Text('Sign in', style: TextStyle(fontSize: 12)),
+                )
             ]),
         body: SafeArea(
             child: Center(
@@ -557,8 +573,10 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                     ),
                   ),
                   SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 8,
+                    runSpacing: 6,
                     children: [
                       TextButton(
                         onPressed: () =>
@@ -567,7 +585,6 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                             style: TextStyle(
                                 color: Colors.grey.shade700, fontSize: 12)),
                       ),
-                      SizedBox(width: 8),
                       FilledButton.icon(
                         icon: Icon(Icons.bolt, size: 15),
                         label: Text('⚡ ইনস্ট্যান্ট এআই স্ক্যান',
@@ -690,28 +707,20 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
               ],
             ),
           ),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: busy ? null : scanText,
-                  icon: Icon(Icons.shield_outlined),
-                  label: Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text(busy ? 'Analyzing…' : 'Scan Now'),
-                  ),
-                ),
-              ),
-              SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: busy ? null : _pasteAndScanFromClipboard,
-                icon: Icon(Icons.content_paste_go, size: 16),
-                label: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Text('Paste & Scan'),
-                ),
-              ),
-            ],
+          FilledButton.icon(
+              onPressed: busy ? null : scanText,
+              icon: Icon(Icons.shield_outlined),
+              label: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text(busy ? 'Analyzing…' : 'Scan Now'))),
+          SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: busy ? null : _pasteAndScanFromClipboard,
+            icon: Icon(Icons.content_paste_go, size: 16),
+            label: Padding(
+              padding: EdgeInsets.symmetric(vertical: 10),
+              child: Text('Paste & Auto-Scan from Clipboard'),
+            ),
           ),
           SizedBox(height: 12),
           Text('Links are never opened automatically.',
