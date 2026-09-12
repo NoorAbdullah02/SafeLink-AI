@@ -689,8 +689,11 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 4,
                   children: [
                     Text('⚡ Quick Demo Scenarios:',
                         style: TextStyle(
@@ -703,6 +706,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                       child: Padding(
                         padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         child: Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(Icons.content_paste_go, size: 14, color: Colors.blue.shade800),
                             SizedBox(width: 4),
@@ -772,10 +776,13 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             onPressed: busy ? null : _pasteAndScanFromClipboard,
             icon: Icon(Icons.content_paste_go, size: 18, color: Colors.blue.shade800),
             label: Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                '📋 Paste & Auto-Scan from Clipboard',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              padding: EdgeInsets.symmetric(vertical: 10),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '📋 Paste & Auto-Scan from Clipboard',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
               ),
             ),
           ),
