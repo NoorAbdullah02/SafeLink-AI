@@ -1074,7 +1074,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                 width: double.infinity,
                 child: FilledButton.icon(
                   icon: Icon(Icons.shield, size: 16),
-                  label: Text('🚨 একাউন্ট ফ্রিজ ও সেলফ-লক প্রোটোকল খুলুন'),
+                  label: Text('🚨 জরুরি একাউন্ট ফ্রিজ ও সেলফ-লক প্রোটোকল খুলুন'),
                   style: FilledButton.styleFrom(
                     backgroundColor: Colors.red.shade800,
                     foregroundColor: Colors.white,
@@ -1912,7 +1912,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'জরুরি একাউন্ট ফ্রিজ প্রোটোকল',
+                          '🚨 জরুরি একাউন্ট ফ্রিজ ও সেলফ-লক প্রোটোকল',
                           style: TextStyle(
                               fontSize: 17,
                               fontWeight: FontWeight.bold,
