@@ -18,5 +18,5 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
   if (!response.ok) throw new Error(data.error || 'Request failed.');
   return data;
 }
-export const post = (path: string, data: unknown) =>
-  api(path, { method: 'POST', body: JSON.stringify(data) });
+export const post = <T = any>(path: string, data: unknown): Promise<T> =>
+  api<T>(path, { method: 'POST', body: JSON.stringify(data) });

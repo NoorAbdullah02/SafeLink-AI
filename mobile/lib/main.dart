@@ -500,6 +500,13 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                               textAlign: TextAlign.center,
                               style: TextStyle(fontSize: 12))
                         ]))))),
+        floatingActionButton: FloatingActionButton(
+          backgroundColor: Colors.blue.shade700,
+          foregroundColor: Colors.white,
+          tooltip: 'সাইবার এআই সহকারী (AI Copilot)',
+          onPressed: showCyberAssistantBottomSheet,
+          child: Icon(Icons.smart_toy_outlined, size: 26),
+        ),
         bottomNavigationBar: NavigationBar(
             selectedIndex: page,
             onDestinationSelected: (value) {
@@ -831,6 +838,59 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                     ),
                   ),
                   Icon(Icons.chevron_right, color: Colors.red.shade700),
+                ],
+              ),
+            ),
+          ),
+        ),
+        SizedBox(height: 10),
+        Card(
+          elevation: 0,
+          color: Colors.blue.shade50,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.blue.shade300, width: 1.2),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: showCyberAssistantBottomSheet,
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade700,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.smart_toy_outlined, color: Colors.white, size: 20),
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '🤖 সাইবার এআই সহকারী (AI Copilot)',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                            color: Colors.blue.shade900,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'বিকাশ/নগদ পিন ফ্রড, একাউন্ট হ্যাক বা জিডি সংক্রান্ত প্রশ্ন করুন',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.blue.shade800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right, color: Colors.blue.shade700),
                 ],
               ),
             ),
@@ -2186,6 +2246,423 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
           ],
         ),
       ),
+    );
+  }
+
+  Map<String, dynamic> _getOfflineCyberAdvice(String query) {
+    final text = query.toLowerCase();
+    if (text.contains('বিকাশ') ||
+        text.contains('নগদ') ||
+        text.contains('রকেট') ||
+        text.contains('bkash') ||
+        text.contains('nagad') ||
+        text.contains('pin') ||
+        text.contains('পিন') ||
+        text.contains('otp') ||
+        text.contains('ওটিপি')) {
+      return {
+        'reply':
+            '🚫 জরুরি নিরাপত্তা সতর্কতা: কাউকে কখনো পিন (PIN) বা ওটিপি (OTP) দেবেন না!\n\n• বিকাশ/নগদ কখনোই গ্রাহককে কল দিয়ে ওটিপি বা পিন নম্বর জানতে চায় না।\n• একাউন্ট সাময়িক লক করতে অ্যাপে পর পর ৩ বার ভুল পিন দিন অথবা হেল্পলাইনে কল দিন।',
+        'suggestions': [
+          'বিকাশ একাউন্ট ফ্রিজ করব কীভাবে?',
+          '৩ বার ভুল পিন দেওয়ার সেলফ-লক কৌশল কি?',
+          'টাকা খোয়া গেলে জিডি করব কীভাবে?',
+        ],
+        'hotlines': [
+          {'name': 'বিকাশ হেল্পলাইন', 'number': '16247'},
+          {'name': 'নগদ হেল্পলাইন', 'number': '16167'},
+        ],
+      };
+    }
+    if (text.contains('facebook') ||
+        text.contains('ফেসবুক') ||
+        text.contains('হ্যাক') ||
+        text.contains('hack') ||
+        text.contains('whatsapp')) {
+      return {
+        'reply':
+            '🛡️ একাউন্ট হ্যাক হলে দ্রুত করণীয়:\n\n১. অবিলম্বে facebook.com/hacked লিংকে যান এবং একাউন্ট রিকভার করুন।\n২. বন্ধুদের সতর্ক করুন যেন কেউ টাকা না পাঠায়।\n৩. সাইবার পুলিশ সেন্টারে (০১৩২০০০০৮৮৮) রিপোর্ট করুন।',
+        'suggestions': [
+          'ব্ল্যাকমেইল করলে কীভাবে থানায় জিডি করব?',
+          'টু-ফ্যাক্টর অথেনটিকেশন কীভাবে চালু করব?',
+        ],
+        'hotlines': [
+          {'name': 'সিআইডি সাইবার পুলিশ', 'number': '01320000888'},
+          {'name': 'জরুরি সেবা ৯৯৯', 'number': '999'},
+        ],
+      };
+    }
+    if (text.contains('টাকা') ||
+        text.contains('প্রতারিত') ||
+        text.contains('scam')) {
+      return {
+        'reply':
+            '⚡ টাকা খোয়া গেলে প্রথম ৩০ মিনিটে করণীয়:\n\n১. দ্রুত বিকাশ (১৬২৪৭) বা নগদে (১৬১৬৭) কল দিয়ে প্রতারকের একাউন্ট ক্যাশআউট হোল্ড করান।\n২. ট্রানজেকশন আইডি ও প্রমাণ নিয়ে নিকটস্থ থানায় সাইবার ক্রাইম জিডি দায়ের করুন।',
+        'suggestions': [
+          'SafeLink থেকে ১-ক্লিক পুলিশ জিডি বানাব কীভাবে?',
+          'বিটিআরসি ১০০ হেল্পলাইনে অভিযোগের নিয়ম কি?',
+        ],
+        'hotlines': [
+          {'name': 'বিকাশ হেল্পলাইন', 'number': '16247'},
+          {'name': 'জাতীয় জরুরি সেবা', 'number': '999'},
+        ],
+      };
+    }
+    return {
+      'reply':
+          '👋 আমি SafeLink সাইবার এআই সহকারী।\n\n• অনলাইন নিরাপত্তা বজায় রাখতে কখনোই কারো সাথে ওটিপি বা পিন শেয়ার করবেন না।\n• যে কোনো অচেনা লিংক SafeLink স্ক্যানারে চেক করে নিন।',
+      'suggestions': [
+        'বিকাশ/নগদ পিন কেউ চাইলে কি করব?',
+        'আমার একাউন্ট হ্যাক হলে দ্রুত কি করব?',
+        'সাইবার ক্রাইম জিডি করার নিয়ম কি?',
+      ],
+      'hotlines': [
+        {'name': 'জরুরি পুলিশ', 'number': '999'},
+        {'name': 'বিকাশ হেল্পলাইন', 'number': '16247'},
+        {'name': 'বিটিআরসি', 'number': '100'},
+      ],
+    };
+  }
+
+  void showCyberAssistantBottomSheet() {
+    final chatMessages = <Map<String, dynamic>>[
+      {
+        'id': 'welcome',
+        'role': 'assistant',
+        'text':
+            '👋 নমস্কার! আমি SafeLink সাইবার এআই সহকারী (Cyber Copilot)।\n\nঅনলাইন সাইবার নিরাপত্তা, ওটিপি/পিন প্রতারণা প্রতিরোধ, ফেসবুক একাউন্ট উদ্ধার এবং পুলিশি জিডি সংক্রান্ত যেকোনো পরামর্শের জন্য আমি প্রস্তুত।\n\nনিচের প্রশ্নে ট্যাপ করুন অথবা আপনার সমস্যা লিখুন:',
+        'time': 'এখন',
+        'suggestions': [
+          'বিকাশ/নগদ পিন কেউ চাইলে কি করব?',
+          'আমার একাউন্ট হ্যাক হলে দ্রুত কি করব?',
+          'সাইবার ক্রাইম জিডি করার নিয়ম কি?',
+          'টাকা খোয়া গেলে উদ্ধারের উপায় কি?',
+        ],
+        'hotlines': [
+          {'name': 'জাতীয় জরুরি সেবা', 'number': '999'},
+          {'name': 'বিকাশ হেল্পলাইন', 'number': '16247'},
+          {'name': 'বিটিআরসি কমপ্লেইন', 'number': '100'},
+        ],
+      }
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final textController = TextEditingController();
+        final scrollController = ScrollController();
+        bool isTyping = false;
+
+        return StatefulBuilder(
+          builder: (bottomSheetContext, setModalState) {
+            void scrollToBottom() {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (scrollController.hasClients) {
+                  scrollController.animateTo(
+                    scrollController.position.maxScrollExtent,
+                    duration: Duration(milliseconds: 250),
+                    curve: Curves.easeOut,
+                  );
+                }
+              });
+            }
+
+            Future<void> sendUserMessage([String? preset]) async {
+              final query = (preset ?? textController.text).trim();
+              if (query.isEmpty || isTyping) return;
+
+              setModalState(() {
+                chatMessages.add({
+                  'id': 'u_${DateTime.now().millisecondsSinceEpoch}',
+                  'role': 'user',
+                  'text': query,
+                  'time': 'এখন',
+                });
+                if (preset == null) textController.clear();
+                isTyping = true;
+              });
+              scrollToBottom();
+
+              try {
+                final history = chatMessages
+                    .sublist(chatMessages.length > 4 ? chatMessages.length - 4 : 0)
+                    .map((m) => {'role': m['role'], 'content': m['text']})
+                    .toList();
+
+                final res = await api.call(
+                  '/assistant',
+                  method: 'POST',
+                  body: {'message': query, 'history': history},
+                );
+
+                if (res is Map && res['reply'] != null) {
+                  setModalState(() {
+                    chatMessages.add({
+                      'id': 'b_${DateTime.now().millisecondsSinceEpoch}',
+                      'role': 'assistant',
+                      'text': res['reply'],
+                      'time': 'এখন',
+                      'suggestions': (res['suggestions'] as List?)
+                          ?.map((dynamic s) => s.toString())
+                          .toList(),
+                      'hotlines': (res['hotlines'] as List?)
+                          ?.map((dynamic h) => h is Map ? h : {})
+                          .toList(),
+                    });
+                    isTyping = false;
+                  });
+                  scrollToBottom();
+                  return;
+                }
+              } catch (_) {}
+
+              final fallback = _getOfflineCyberAdvice(query);
+              setModalState(() {
+                chatMessages.add({
+                  'id': 'b_${DateTime.now().millisecondsSinceEpoch}',
+                  'role': 'assistant',
+                  'text': fallback['reply'],
+                  'time': 'এখন',
+                  'suggestions': fallback['suggestions'],
+                  'hotlines': fallback['hotlines'],
+                });
+                isTyping = false;
+              });
+              scrollToBottom();
+            }
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.88,
+              decoration: BoxDecoration(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    margin: EdgeInsets.only(top: 10, bottom: 6),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade400,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: Colors.blue.shade700,
+                          radius: 18,
+                          child: Icon(Icons.smart_toy_outlined,
+                              color: Colors.white, size: 20),
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'SafeLink সাইবার এআই সহকারী',
+                                style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue.shade900),
+                              ),
+                              Text(
+                                'Cyber Safety Copilot · ২৪/৭ সক্রিয় এআই বিশেষজ্ঞ',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey.shade600),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.close),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(height: 1),
+                  Expanded(
+                    child: ListView.builder(
+                      controller: scrollController,
+                      padding: EdgeInsets.all(14),
+                      itemCount: chatMessages.length,
+                      itemBuilder: (_, idx) {
+                        final msg = chatMessages[idx];
+                        final isUser = msg['role'] == 'user';
+                        final hotlines = (msg['hotlines'] as List?) ?? [];
+
+                        return Padding(
+                          padding: EdgeInsets.symmetric(vertical: 6),
+                          child: Row(
+                            mainAxisAlignment: isUser
+                                ? MainAxisAlignment.end
+                                : MainAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (!isUser) ...[
+                                CircleAvatar(
+                                  radius: 13,
+                                  backgroundColor: Colors.blue.shade100,
+                                  child: Icon(Icons.smart_toy_outlined,
+                                      size: 14, color: Colors.blue.shade900),
+                                ),
+                                SizedBox(width: 8),
+                              ],
+                              Flexible(
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: isUser
+                                        ? Colors.blue.shade700
+                                        : (Theme.of(context).brightness ==
+                                                Brightness.dark
+                                            ? Colors.grey.shade800
+                                            : Colors.grey.shade100),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: isUser
+                                        ? null
+                                        : Border.all(
+                                            color: Colors.grey.shade300),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        msg['text'] ?? '',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          height: 1.4,
+                                          color: isUser
+                                              ? Colors.white
+                                              : (Theme.of(context).brightness ==
+                                                      Brightness.dark
+                                                  ? Colors.white
+                                                  : Colors.black87),
+                                        ),
+                                      ),
+                                      if (hotlines.isNotEmpty) ...[
+                                        SizedBox(height: 8),
+                                        Wrap(
+                                          spacing: 6,
+                                          runSpacing: 6,
+                                          children: hotlines.map((dynamic h) {
+                                            final name = h['name'] ?? 'Hotline';
+                                            final num = h['number'] ?? '';
+                                            return ActionChip(
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                              avatar: Icon(Icons.phone_in_talk,
+                                                  size: 13,
+                                                  color: Colors.blue.shade800),
+                                              label: Text('$name: $num',
+                                                  style: TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.bold)),
+                                              onPressed: () =>
+                                                  _dialPhone(num.toString()),
+                                            );
+                                          }).toList(),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  if (isTyping)
+                    Padding(
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: 8),
+                          Text('এআই সহকারী পরামর্শ বিশ্লেষণ করছে…',
+                              style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: Colors.grey.shade600)),
+                        ],
+                      ),
+                    ),
+                  if (chatMessages.isNotEmpty &&
+                      chatMessages.last['suggestions'] != null)
+                    Container(
+                      height: 42,
+                      padding: EdgeInsets.symmetric(horizontal: 10),
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: (chatMessages.last['suggestions'] as List)
+                            .map((dynamic s) {
+                          return Padding(
+                            padding: EdgeInsets.only(right: 6),
+                            child: ActionChip(
+                              visualDensity: VisualDensity.compact,
+                              avatar: Icon(Icons.auto_awesome,
+                                  size: 13, color: Colors.blue.shade700),
+                              label: Text(s.toString(),
+                                  style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w600)),
+                              onPressed: () =>
+                                  sendUserMessage(s.toString()),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  Divider(height: 1),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(14, 8, 14, 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: textController,
+                            decoration: InputDecoration(
+                              hintText: 'সাইবার সমস্যা বা প্রশ্ন লিখুন…',
+                              hintStyle: TextStyle(fontSize: 13),
+                              contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                            onSubmitted: (_) => sendUserMessage(),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        IconButton.filled(
+                          icon: Icon(Icons.send, size: 18),
+                          onPressed: () => sendUserMessage(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 

@@ -48,6 +48,9 @@ import {
   Zap,
   Copy,
   Scale,
+  Bot,
+  Send,
+  Sparkles,
 } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { api, post } from './api';
@@ -126,7 +129,8 @@ export default function App() {
     [authOpen, setAuthOpen] = useState(false),
     [refresh, setRefresh] = useState(0),
     [preset, setPreset] = useState<{ kind: ScanKind; text: string } | null>(null),
-    [globalPanicOpen, setGlobalPanicOpen] = useState(false);
+    [globalPanicOpen, setGlobalPanicOpen] = useState(false),
+    [assistantOpen, setAssistantOpen] = useState(false);
   const [action] = useState(() => new URLSearchParams(location.search).get('action'));
   useEffect(() => {
     api('/health')
@@ -425,6 +429,20 @@ export default function App() {
           }}
         />
       )}
+      {assistantOpen && (
+        <CyberAssistantModal onClose={() => setAssistantOpen(false)} />
+      )}
+      <button
+        type="button"
+        className="floating-assistant-btn"
+        onClick={() => setAssistantOpen(true)}
+        aria-label="Open Cyber Safety AI Assistant"
+        title="সাইবার এআই সহকারী (Ask AI Bot)"
+      >
+        <span className="bot-pulse-dot" />
+        <Bot size={21} className="bot-icon-spin" />
+        <span className="bot-btn-text">🤖 সাইবার এআই সহকারী</span>
+      </button>
     </div>
   );
 }
@@ -1712,6 +1730,221 @@ function EmergencyFreezeModal({
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function CyberAssistantModal({ onClose }: { onClose: () => void }) {
+  const [messages, setMessages] = useState<Array<{
+    id: string;
+    role: 'user' | 'assistant';
+    text: string;
+    time: string;
+    suggestions?: string[];
+    hotlines?: Array<{ name: string; number: string; tag: string }>;
+  }>>([
+    {
+      id: 'welcome',
+      role: 'assistant',
+      text: '👋 **নমস্কার! আমি SafeLink সাইবার এআই সহকারী (Cyber Copilot)।**\n\nআমি আপনাকে অনলাইন সাইবার নিরাপত্তা, ফিশিং ও ওটিপি প্রতারণা প্রতিরোধ, ফেসবুক/হোয়াটসঅ্যাপ একাউন্ট উদ্ধার এবং পুলিশি জিডি সংক্রান্ত পরামর্শ দিতে প্রস্তুত।\n\nনিচের যেকোনো প্রশ্নে ট্যাপ করতে পারেন অথবা আপনার সমস্যা লিখে পাঠান:',
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      suggestions: [
+        'বিকাশ/নগদ পিন কেউ চাইলে কি করব?',
+        'আমার একাউন্ট হ্যাক হলে দ্রুত কি করব?',
+        'সাইবার ক্রাইম জিডি করার নিয়ম কি?',
+        'টাকা খোয়া গেলে তাৎক্ষণিক উদ্ধারের উপায় কি?',
+      ],
+      hotlines: [
+        { name: 'জাতীয় জরুরি সেবা', number: '999', tag: 'পুলিশ' },
+        { name: 'বিকাশ হেল্পলাইন', number: '16247', tag: 'MFS' },
+        { name: 'বিটিআরসি কমপ্লেইন', number: '100', tag: 'টেলিকম' },
+      ],
+    },
+  ]);
+  const [inputMessage, setInputMessage] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isTyping]);
+
+  const sendMessage = async (textToSend?: string) => {
+    const query = (textToSend || inputMessage).trim();
+    if (!query || isTyping) return;
+
+    const userMsgId = 'u_' + Date.now();
+    const userMsg = {
+      id: userMsgId,
+      role: 'user' as const,
+      text: query,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    if (!textToSend) setInputMessage('');
+    setIsTyping(true);
+
+    try {
+      const history = messages.slice(-4).map((m) => ({ role: m.role, content: m.text }));
+      const res = await post<{
+        reply: string;
+        suggestions: string[];
+        hotlines: Array<{ name: string; number: string; tag: string }>;
+      }>('/assistant', { message: query, history });
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: 'bot_' + Date.now(),
+          role: 'assistant',
+          text: res.reply,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          suggestions: res.suggestions,
+          hotlines: res.hotlines,
+        },
+      ]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: 'bot_' + Date.now(),
+          role: 'assistant',
+          text: '⚠️ কোনো অবস্থাতেই আপনার বিকাশ/নগদ পিন (PIN), ওটিপি বা পাসওয়ার্ড কারো সাথে শেয়ার করবেন না। জরুরি পুলিশি সহায়তায় ৯৯৯ অথবা বিকাশ হটলাইন ১৬২৪৭ এ যোগাযোগ করুন।',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          hotlines: [
+            { name: 'National Police Emergency', number: '999', tag: '24/7 Police' },
+            { name: 'bKash Hotline', number: '16247', tag: 'MFS Desk' },
+          ],
+        },
+      ]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const formatText = (content: string) => {
+    return content.split('\n').map((line, i) => {
+      const boldParts = line.split(/(\*\*[^*]+\*\*)/g);
+      return (
+        <div key={i} className="chat-line">
+          {boldParts.map((part, pi) => {
+            if (part.startsWith('**') && part.endsWith('**')) {
+              return <strong key={pi}>{part.slice(2, -2)}</strong>;
+            }
+            return <span key={pi}>{part}</span>;
+          })}
+        </div>
+      );
+    });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal cyber-assistant-modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="Cyber Safety AI Assistant"
+      >
+        <div className="assistant-modal-header">
+          <div className="assistant-title-box">
+            <div className="assistant-avatar">
+              <Bot size={22} />
+              <span className="online-indicator-dot" />
+            </div>
+            <div>
+              <strong>SafeLink সাইবার এআই সহকারী</strong>
+              <small>Cyber Safety Copilot · ২৪/৭ সক্রিয় এআই বিশেষজ্ঞ</small>
+            </div>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="assistant-chat-body">
+          {messages.map((m) => (
+            <div key={m.id} className={`chat-message-row ${m.role}`}>
+              {m.role === 'assistant' && (
+                <div className="chat-msg-avatar">
+                  <Bot size={16} />
+                </div>
+              )}
+              <div className="chat-bubble">
+                <div className="chat-bubble-text">{formatText(m.text)}</div>
+                {m.hotlines && m.hotlines.length > 0 && (
+                  <div className="chat-hotlines-wrap">
+                    {m.hotlines.map((h) => (
+                      <a key={h.number} href={`tel:${h.number}`} className="chat-hotline-chip">
+                        <PhoneCall size={12} /> {h.name}: <strong>{h.number}</strong>
+                      </a>
+                    ))}
+                  </div>
+                )}
+                <span className="chat-timestamp">{m.time}</span>
+              </div>
+            </div>
+          ))}
+
+          {isTyping && (
+            <div className="chat-message-row assistant">
+              <div className="chat-msg-avatar">
+                <Bot size={16} />
+              </div>
+              <div className="chat-bubble typing-bubble">
+                <div className="typing-dots">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <small>এআই সহকারী বিশ্লেষণ করছে…</small>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {messages[messages.length - 1]?.suggestions && (
+          <div className="assistant-suggestions-bar">
+            {messages[messages.length - 1].suggestions?.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className="suggestion-chip-btn"
+                onClick={() => sendMessage(s)}
+              >
+                <Sparkles size={12} /> {s}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <form
+          className="assistant-input-footer"
+          onSubmit={(e) => {
+            e.preventDefault();
+            sendMessage();
+          }}
+        >
+          <input
+            type="text"
+            className="assistant-text-input"
+            placeholder="সাইবার নিরাপত্তা বা প্রতারণা সম্পর্কে প্রশ্ন লিখুন…"
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            disabled={isTyping}
+          />
+          <button
+            type="submit"
+            className="assistant-send-btn"
+            disabled={isTyping || !inputMessage.trim()}
+            aria-label="Send message"
+          >
+            <Send size={16} />
+          </button>
+        </form>
       </div>
     </div>
   );

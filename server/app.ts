@@ -14,6 +14,7 @@ import { enrich } from './providers.js';
 import { defaultBrands } from './brands.js';
 import { mailReady, sendMail, accountLink } from './mail.js';
 import { readImage } from './media.js';
+import { askCyberAssistant } from './assistant.js';
 import { categories, type ScanResult, type ScanKind, type Brand } from '../shared/types.js';
 type Authed = Request & { user?: Row; sessionId?: string; accountUnavailable?: boolean };
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
@@ -367,6 +368,23 @@ export function createApp(store: Store) {
   app.post('/api/scans', scanLimit, async (req: Authed, res) =>
     res.json(await runScan(req, scanInput.parse(req.body))),
   );
+  app.post('/api/assistant', async (req: Authed, res) => {
+    const input = z
+      .object({
+        message: z.string().trim().min(1).max(3000),
+        history: z
+          .array(
+            z.object({
+              role: z.string(),
+              content: z.string(),
+            }),
+          )
+          .optional(),
+      })
+      .parse(req.body);
+    const result = await askCyberAssistant(input.message, input.history);
+    res.json(result);
+  });
   const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 4 },
