@@ -508,6 +508,9 @@ function Scanner({
       const r = await post('/scans', { kind: demoKind, text: demoText, external, save });
       setResult(r);
       onScan();
+      setTimeout(() => {
+        document.getElementById('scan-result-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -585,6 +588,9 @@ function Scanner({
         const r = await post('/scans', { kind: detectedKind, text: clip, external, save });
         setResult(r);
         onScan();
+        setTimeout(() => {
+          document.getElementById('scan-result-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -612,6 +618,9 @@ function Scanner({
       } else r = await post('/scans', { kind, text, external, save });
       setResult(r);
       onScan();
+      setTimeout(() => {
+        document.getElementById('scan-result-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -777,9 +786,44 @@ function Scanner({
                     maxLength={10000}
                     placeholder={kindInfo[kind].placeholder}
                     value={text}
-                    onChange={(e) => setText(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setText(val);
+                      const trimmed = val.trim();
+                      if (trimmed) {
+                        const isUrl =
+                          trimmed.startsWith('http://') ||
+                          trimmed.startsWith('https://') ||
+                          trimmed.startsWith('www.') ||
+                          (!trimmed.includes(' ') && !trimmed.includes('\n') && trimmed.includes('.'));
+                        if (isUrl && kind !== 'url') setKind('url');
+                        else if (!isUrl && trimmed.includes(' ') && kind !== 'message') setKind('message');
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                        e.preventDefault();
+                        if (text.trim() && !busy) {
+                          scan(e as any);
+                        }
+                      }
+                    }}
                     required
                   />
+                  {text && (
+                    <button
+                      type="button"
+                      className="btn-textarea-clear"
+                      onClick={() => {
+                        setText('');
+                        setResult(null);
+                      }}
+                      title="Clear text"
+                      aria-label="Clear text"
+                    >
+                      <X size={15} />
+                    </button>
+                  )}
                   <span className="char-count">{text.length.toLocaleString()} / 10,000</span>
                 </div>
               ) : (
@@ -1005,7 +1049,9 @@ function Scanner({
         </div>
       )}
       {result ? (
-        <Result result={result} user={user} notify={notify} requireAuth={requireAuth} />
+        <div id="scan-result-card">
+          <Result result={result} user={user} notify={notify} requireAuth={requireAuth} />
+        </div>
       ) : (
         <div className="how-section">
           <div className="section-title">

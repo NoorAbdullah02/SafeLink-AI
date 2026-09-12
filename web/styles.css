@@ -18,6 +18,9 @@
   --shadow: 0 3px 12px #132f3a03;
   font-size: 16px;
 }
+html {
+  scroll-behavior: smooth;
+}
 * {
   box-sizing: border-box;
 }
@@ -3651,6 +3654,37 @@ body { background: var(--bg); color: var(--text); }
 [data-theme='dark'] .btn-paste-quick:hover {
   background: var(--green);
   color: #ffffff;
+}
+
+.btn-textarea-clear {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.08);
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  z-index: 5;
+}
+.btn-textarea-clear:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  transform: scale(1.08);
+}
+[data-theme='dark'] .btn-textarea-clear {
+  background: rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+}
+[data-theme='dark'] .btn-textarea-clear:hover {
+  background: rgba(239, 68, 68, 0.25);
+  color: #f87171;
 }
 
 /* Quick Paste & Scan button in scan submit */

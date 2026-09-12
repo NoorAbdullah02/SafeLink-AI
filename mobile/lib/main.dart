@@ -488,38 +488,49 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                     MediaQuery.textScalerOf(context).scale(1) *
                                         1.15)
                                 : MediaQuery.textScalerOf(context)),
-                        child: ListView(padding: EdgeInsets.all(20), children: [
-                          InkWell(
-                            onTap: changeServerUrl,
-                            borderRadius: BorderRadius.circular(6),
-                            child: Padding(
-                              padding: EdgeInsets.symmetric(vertical: 4),
-                              child: Row(children: [
-                                Expanded(
-                                  child: Text(status,
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          color: status.contains('unavailable')
-                                              ? Colors.red
-                                              : green,
-                                          fontWeight: FontWeight.w600)),
+                        child: GestureDetector(
+                          onTap: () => FocusScope.of(context).unfocus(),
+                          behavior: HitTestBehavior.opaque,
+                          child: ListView(
+                            padding: EdgeInsets.all(20),
+                            physics: const BouncingScrollPhysics(),
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            children: [
+                              InkWell(
+                                onTap: changeServerUrl,
+                                borderRadius: BorderRadius.circular(6),
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 4),
+                                  child: Row(children: [
+                                    Expanded(
+                                      child: Text(status,
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              color: status.contains('unavailable')
+                                                  ? Colors.red
+                                                  : green,
+                                              fontWeight: FontWeight.w600)),
+                                    ),
+                                    Icon(Icons.tune, size: 16, color: green)
+                                  ]),
                                 ),
-                                Icon(Icons.tune, size: 16, color: green)
-                              ]),
-                            ),
+                              ),
+                              SizedBox(height: 22),
+                              ...content,
+                              if (busy)
+                                Padding(
+                                    padding: EdgeInsets.all(18),
+                                    child: Center(
+                                        child: CircularProgressIndicator(
+                                            color: green))),
+                              SizedBox(height: 20),
+                              Text('Risk scores are indicators, not guarantees.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 12))
+                            ],
                           ),
-                          SizedBox(height: 22),
-                          ...content,
-                          if (busy)
-                            Padding(
-                                padding: EdgeInsets.all(18),
-                                child:
-                                    Center(child: CircularProgressIndicator())),
-                          SizedBox(height: 20),
-                          Text('Risk scores are indicators, not guarantees.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 12))
-                        ]))))),
+                        ))))),
         floatingActionButton: FloatingActionButton(
           backgroundColor: green,
           foregroundColor: Colors.white,
@@ -552,108 +563,118 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
         Text(
             'Check links, বাংলা / Banglish messages, QR codes and screenshots.'),
         SizedBox(height: 22),
-        if (_showClipboardBanner) ...[
-          Card(
-            elevation: 1,
-            color: Colors.amber.shade50,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.amber.shade400, width: 1.2),
-            ),
-            child: Padding(
-              padding: EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.content_paste_search,
-                          color: Colors.orange.shade800, size: 20),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'ক্লিপবোর্ডে লিঙ্ক/টেক্সট পাওয়া গেছে!',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            color: Colors.orange.shade900,
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          child: _showClipboardBanner
+              ? Card(
+                  key: const ValueKey('clipboard_banner'),
+                  elevation: 0,
+                  color: green.withValues(alpha: 0.08),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(
+                        color: green.withValues(alpha: 0.35), width: 1.2),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.content_paste_search,
+                                color: green, size: 20),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'ক্লিপবোর্ডে লিঙ্ক/মেসেজ পাওয়া গেছে!',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: Color(0xFF0D4A39),
+                                ),
+                              ),
+                            ),
+                            InkWell(
+                              borderRadius: BorderRadius.circular(20),
+                              onTap: () =>
+                                  setState(() => _showClipboardBanner = false),
+                              child: Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.close,
+                                    size: 18, color: Colors.grey.shade700),
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                                color: green.withValues(alpha: 0.2)),
+                          ),
+                          child: Text(
+                            _clipboardPreview,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontFamily: 'monospace',
+                                color: Colors.black87),
                           ),
                         ),
-                      ),
-                      InkWell(
-                        onTap: () =>
-                            setState(() => _showClipboardBanner = false),
-                        child: Padding(
-                          padding: EdgeInsets.all(4),
-                          child: Icon(Icons.close,
-                              size: 18, color: Colors.grey.shade700),
+                        SizedBox(height: 8),
+                        Wrap(
+                          alignment: WrapAlignment.end,
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            TextButton(
+                              onPressed: () =>
+                                  setState(() => _showClipboardBanner = false),
+                              child: Text('উপেক্ষা করুন',
+                                  style: TextStyle(
+                                      color: Colors.grey.shade700, fontSize: 12)),
+                            ),
+                            FilledButton.icon(
+                              icon: Icon(Icons.bolt, size: 15),
+                              label: Text('⚡ ইনস্ট্যান্ট এআই স্ক্যান',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold)),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: green,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _showClipboardBanner = false;
+                                  input.text = _clipboardText;
+                                  kind = _clipboardText.startsWith('http') ||
+                                          (!_clipboardText.contains(' ') &&
+                                              _clipboardText.contains('.'))
+                                      ? 'url'
+                                      : 'message';
+                                  result = null;
+                                });
+                                scanText();
+                              },
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 6),
-                  Container(
-                    width: double.infinity,
-                    padding: EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.amber.shade200),
-                    ),
-                    child: Text(
-                      _clipboardPreview,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontFamily: 'monospace',
-                          color: Colors.black87),
+                      ],
                     ),
                   ),
-                  SizedBox(height: 8),
-                  Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: [
-                      TextButton(
-                        onPressed: () =>
-                            setState(() => _showClipboardBanner = false),
-                        child: Text('উপেক্ষা করুন',
-                            style: TextStyle(
-                                color: Colors.grey.shade700, fontSize: 12)),
-                      ),
-                      FilledButton.icon(
-                        icon: Icon(Icons.bolt, size: 15),
-                        label: Text('⚡ ইনস্ট্যান্ট এআই স্ক্যান',
-                            style: TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.bold)),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.orange.shade800,
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        onPressed: () {
-                          setState(() {
-                            _showClipboardBanner = false;
-                            input.text = _clipboardText;
-                            kind = _clipboardText.startsWith('http') ||
-                                    (!_clipboardText.contains(' ') &&
-                                        _clipboardText.contains('.'))
-                                ? 'url'
-                                : 'message';
-                            result = null;
-                          });
-                          scanText();
-                        },
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SizedBox(height: 12),
-        ],
+                )
+              : const SizedBox.shrink(),
+        ),
+        SizedBox(height: 12),
         panel(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           SegmentedButton<String>(
               showSelectedIcon: false,
@@ -680,6 +701,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
               minLines: 3,
               maxLines: 7,
               maxLength: 10000,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => scanText(),
               buildCounter: (context,
                       {required currentLength,
                       required isFocused,
@@ -791,8 +814,17 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
               icon: Icon(Icons.image_outlined),
               label: Text('Screenshot'))
         ]),
-        SizedBox(height: 14),
-        if (result != null) resultPanel(result!),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          child: result != null
+              ? KeyedSubtree(
+                  key: ValueKey(result!['id'] ?? 'scan_result'),
+                  child: resultPanel(result!),
+                )
+              : const SizedBox.shrink(),
+        ),
         if (result == null) ...[
           Container(
             padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
