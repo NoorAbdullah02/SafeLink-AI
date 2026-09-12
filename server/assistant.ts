@@ -9,6 +9,36 @@ export interface AssistantResponse {
 export function getCyberExpertResponse(userMessage: string): AssistantResponse {
   const text = userMessage.toLowerCase().trim();
 
+  // 0. Official Cyber & Emergency Helplines of Bangladesh
+  if (
+    text.includes('হেল্পলাইন') ||
+    text.includes('হটলাইন') ||
+    text.includes('helpline') ||
+    text.includes('hotline') ||
+    text.includes('যোগাযোগ') ||
+    text.includes('নাম্বার') ||
+    text.includes('নম্বর') ||
+    text.includes('ফোন নম্বর') ||
+    text.includes('emergency') ||
+    text.includes('ইমার্জেন্সি')
+  ) {
+    return {
+      reply: `📞 **বাংলাদেশের জরুরি সাইবার ও ডিজিটাল নিরাপত্তা হটলাইনসমূহ:**\n\n• **জাতীয় জরুরি সেবা (পুলিশ, অ্যাম্বুলেন্স, ফায়ার):** ৯৯৯ (টোল ফ্রি)\n• **বিকাশ কাস্টমার কেয়ার ও ইমার্জেন্সি ফ্রিজ:** ১৬২৪৭\n• **নগদ হেল্পলাইন:** ১৬১৬৭\n• **রকেট হেল্পলাইন:** ১৬২১৬\n• **পুলিশ সাইবার সাপোর্ট ফর উইমেন (PCSF):** ০১৩২০০০০৮৮৮\n• **সিআইডি সাইবার পুলিশ সেন্টার (CPC):** ০১৩২০০০০৮৮৮\n• **বিটিআরসি সাইবার ও টেলিকম অভিযোগ:** ১০০\n• **জাতীয় তথ্য সেবা:** ৩৩৩\n\n💡 *পরামর্শ: আর্থিক প্রতারণার শিকার হলে তৎক্ষণাৎ ১৬২৪৭ বা ১৬১৬৭ তে কল দিয়ে একাউন্ট সাময়িক হোল্ড করুন এবং ৯৯৯ অথবা নিকটস্থ থানায় সাধারণ ডায়েরি (GD) দায়ের করুন।*`,
+      suggestions: [
+        'বিকাশ একাউন্ট তাৎক্ষণিক ফ্রিজ করার নিয়ম কি?',
+        'পুলিশ সাইবার সাপোর্ট ফর উইমেন কীভাবে সহায়তা করে?',
+        'অনলাইনে সাইবার জিডি কীভাবে করব?',
+      ],
+      hotlines: [
+        { name: 'bKash Hotline', number: '16247', tag: 'MFS 24/7' },
+        { name: 'Nagad Hotline', number: '16167', tag: 'Postal MFS' },
+        { name: 'CID Cyber Police', number: '01320000888', tag: 'CID Desk' },
+        { name: 'National Emergency', number: '999', tag: 'Toll-Free Police' },
+        { name: 'BTRC Call Center', number: '100', tag: 'Govt Desk' },
+      ],
+    };
+  }
+
   // 1. MFS / bKash / Nagad / Rocket OTP & PIN Scams
   if (
     text.includes('বিকাশ') ||
