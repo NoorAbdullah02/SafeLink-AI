@@ -22,6 +22,7 @@ class SafeLinkApp extends StatelessWidget {
       theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: green),
           scaffoldBackgroundColor: Color(0xfff5f7f9),
+          splashFactory: InkRipple.splashFactory,
           useMaterial3: true,
           inputDecorationTheme: InputDecorationTheme(
               border:
@@ -29,6 +30,7 @@ class SafeLinkApp extends StatelessWidget {
       darkTheme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
               seedColor: green, brightness: Brightness.dark),
+          splashFactory: InkRipple.splashFactory,
           useMaterial3: true),
       home: Workspace());
 }
@@ -187,6 +189,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             ? 'url'
             : 'message';
         input.text = text;
+        input.selection =
+            TextSelection.fromPosition(TextPosition(offset: text.length));
         result = null;
       });
       scanText();
@@ -252,6 +256,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
           ? 'url'
           : 'message';
       input.text = trimmed;
+      input.selection =
+          TextSelection.fromPosition(TextPosition(offset: trimmed.length));
       result = null;
       _showClipboardBanner = false;
     });
@@ -335,7 +341,12 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     if (value == null || !mounted) return;
     setState(() {
       input.text = value;
-      kind = 'message';
+      input.selection =
+          TextSelection.fromPosition(TextPosition(offset: value.length));
+      kind = value.trim().startsWith('http') ||
+              (!value.trim().contains(' ') && value.trim().contains('.'))
+          ? 'url'
+          : 'message';
       page = 0;
     });
     await action(() async {
@@ -656,6 +667,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                 setState(() {
                                   _showClipboardBanner = false;
                                   input.text = _clipboardText;
+                                  input.selection = TextSelection.fromPosition(
+                                      TextPosition(offset: _clipboardText.length));
                                   kind = _clipboardText.startsWith('http') ||
                                           (!_clipboardText.contains(' ') &&
                                               _clipboardText.contains('.'))
@@ -2694,7 +2707,14 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                     ),
                   Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12),
                   Padding(
-                    padding: EdgeInsets.fromLTRB(14, 8, 14, 16),
+                    padding: EdgeInsets.fromLTRB(
+                        14,
+                        8,
+                        14,
+                        16 +
+                            MediaQuery.of(bottomSheetContext)
+                                .viewInsets
+                                .bottom),
                     child: Row(
                       children: [
                         Expanded(
@@ -2884,14 +2904,10 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                   icon: Icon(Icons.play_arrow, size: 18),
                   label: Text('Test Live Simulation in Scanner'),
                   onPressed: () {
-                    setState(() {
-                      page = 0;
-                      kind = 'message';
-                      input.text =
-                          'Apnar bKash account bondho! Ekhoni https://bkash-verify.example e PIN din.';
-                      result = null;
-                    });
-                    scanText();
+                    loadDemoScenario(
+                      'message',
+                      'Apnar bKash account bondho! Ekhoni https://bkash-verify.example e PIN din.',
+                    );
                   },
                 ),
               ),
@@ -3015,8 +3031,11 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
 
   void loadDemoScenario(String scenarioKind, String scenarioText) {
     setState(() {
+      page = 0;
       kind = scenarioKind;
       input.text = scenarioText;
+      input.selection =
+          TextSelection.fromPosition(TextPosition(offset: scenarioText.length));
       result = null;
     });
     scanText();
@@ -3864,7 +3883,8 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
     if (confirmed == true) {
       await action(() async {
         await api.call('/contacts',
-            method: 'POST', body: {'name': name.text, 'email': email.text});
+            method: 'POST',
+            body: {'name': name.text.trim(), 'email': email.text.trim()});
       });
       await loadAccountData();
     }
@@ -4233,7 +4253,7 @@ class _ServerDialogState extends State<ServerDialog> {
               onPressed: () => Navigator.pop(context, null),
               child: Text('Cancel')),
           FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text),
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
               child: Text('Save & Connect')),
         ],
       );
