@@ -2994,7 +2994,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
       );
 
   Widget _metricChip(String title, String subtitle) => Container(
-        width: 160,
+        constraints: BoxConstraints(minWidth: 135, maxWidth: 175),
         padding: EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: Colors.black.withValues(alpha: 0.03),
