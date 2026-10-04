@@ -58,9 +58,11 @@ flutter test
 flutter build apk --debug --dart-define=API_URL=https://your-safelink-host
 ```
 
-See [the mobile README](mobile/README.md) for phone connectivity and signing, and [the Android build record](docs/ANDROID-BUILD.md) for the current blocker. Approved portable tools were installed, but Windows Application Control blocked `impellerc.exe` during compilation; no fresh APK was produced and no security settings were changed. No authorized Android device was connected for acceptance testing.
+On 5 October 2026, the audited source was pushed to `codex/safelink-audit` and opened as [draft PR #1](https://github.com/NoorAbdullah02/SafeLink-AI/pull/1); `master` remains unchanged. The [successful GitHub Actions run](https://github.com/NoorAbdullah02/SafeLink-AI/actions/runs/37228833017) passed both `web-api` and `flutter` jobs, including Flutter analysis/tests, debug APK compilation, signature verification and checksum artifact generation. Download **SafeLink-AI-debug-apk** from that run. Its APK was built from source `c9c2284` (`c9c22845b9dc0589a87657b10c9e4d176504ff84`); later documentation changes are not part of that artifact. Local verification passed: the downloaded archive digest matched GitHub, the extracted APK matched its SHA-256 file, and `apksigner` accepted its v2 debug signature (exit 0). No physical-device installation was performed.
 
-The prepared Linux CI workflow pins Flutter/Java, verifies the debug APK signature and uploads a test APK with its checksum when successful. It has not run for these changes. Pushes no longer overwrite a fixed public release tag. Public releases require the owner's signing configuration and an explicitly reviewed release.
+See [the mobile README](mobile/README.md) for phone connectivity and signing, and [the Android build record](docs/ANDROID-BUILD.md) for both build environments. The earlier Windows attempt was blocked by Application Control at `impellerc.exe`, produced no local APK and changed no security settings. The Linux CI build succeeded. No authorized Android device was connected for acceptance testing.
+
+CI uploads a test APK rather than overwriting a fixed public release tag. Public releases require the owner's signing configuration and an explicitly reviewed release.
 
 ## Competition and deployment
 
@@ -68,6 +70,6 @@ Use [the competition demo guide](docs/COMPETITION-DEMO.md) for controlled inputs
 
 Read-only checks passed for Neon connectivity and the expected columns of all ten tables, without reading personal rows or writing data. Brevo returned HTTP 200 with an active configured sender; no email was sent. Mistral returned HTTP 401 and needs the owner's provider/key correction and a new check. Google Safe Browsing is not configured. Real email delivery and external-model quality remain unverified.
 
-The repository previously listed [a Render website](https://safelink-ai-8q6c.onrender.com) and [an Android release](https://github.com/NoorAbdullah02/SafeLink-AI/releases/tag/v1.0.0). Those are separately published versions. A later read-only Render health request returned HTTP 200 with PostgreSQL/email/AI configured and intelligence off; this reports configuration and does not prove the fixes are deployed or those providers work. Local changes still need source review, CI and deployment/rebuilding before they appear in the published versions.
+The repository previously listed [a Render website](https://safelink-ai-8q6c.onrender.com) and [an Android release](https://github.com/NoorAbdullah02/SafeLink-AI/releases/tag/v1.0.0). Those are separately published versions. A later read-only Render health request returned HTTP 200 with PostgreSQL/email/AI configured and intelligence off; this reports configuration and does not prove the fixes are deployed or those providers work. The audited branch is pushed and CI has passed, but the draft PR is unmerged and deployment of the fixes remains pending. The cloud debug APK is a test artifact, not an updated public release.
 
 Owner repository: [NoorAbdullah02/SafeLink-AI](https://github.com/NoorAbdullah02/SafeLink-AI).
