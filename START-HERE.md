@@ -26,10 +26,12 @@
 
 Release signing-এর জন্য নিজের keystore লাগবে। iOS build করতে Mac/Xcode লাগবে।
 
+এই laptop-এ project-এর `work` folder-এ JDK/Android SDK setup করা হয়েছে। নতুন APK build-এর সময় Windows Application Control Flutter-এর shader compiler আটকে দিয়েছে, তাই নতুন APK এখনও তৈরি হয়নি। Linux GitHub Actions-এ build ও artifact download-এর প্রস্তুত নির্দেশনা আছে [Android build guide](docs/ANDROID-BUILD.md)-এ।
+
 ## GitHub ও deployment
 
 তোমার repository: `https://github.com/NoorAbdullah02/SafeLink-AI.git`
 
-Push command ও hosting setup আছে [deployment guide](docs/DEPLOYMENT.md)-এ। এখানে কোনো GitHub push বা public deployment করা হয়নি।
+Push command ও hosting setup আছে [deployment guide](docs/DEPLOYMENT.md)-এ। এই audit-এর fixes local source-এ আছে; published website/app-এ আনতে নতুন deployment ও app build লাগবে।
 
-কোন কাজ পরীক্ষা করা হয়েছে এবং কোনটি credentials/device ছাড়া বাকি আছে: [validation record](docs/VALIDATION.md)।
+বর্তমান সমস্যা ও fix: [audit report](docs/AUDIT-2026-10-04.md)। Competition presentation ও demo inputs: [demo guide](docs/COMPETITION-DEMO.md)। কোন কাজ পরীক্ষা করা হয়েছে এবং কোনটি credentials/device ছাড়া বাকি আছে: [validation record](docs/VALIDATION.md)।

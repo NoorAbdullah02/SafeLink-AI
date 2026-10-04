@@ -1,3 +1,4 @@
+import './setup.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { localScan, normalizeUrl, extractPhones, extractUrls } from '../server/engine.js';
@@ -78,4 +79,24 @@ test('safety advice cannot hide a later credential request', () => {
 test('scheme-less domains accept ports and malformed hosts fail', () => {
   assert.equal(normalizeUrl('example.com:8443/login').port, '8443');
   for (const value of ['https://-bad.example', 'https://bad..example', 'https://bad_.example']) assert.throws(() => normalizeUrl(value));
+});
+
+test('bare uncommon and Unicode domains are extracted from messages', () => {
+  for (const text of ['Enter your PIN at bkash-login.io/claim', 'Enter your OTP at bkash-check.co.uk/login', 'Enter OTP at раураl.com/login']) {
+    const result = localScan(text, 'message');
+    assert.equal(result.urls.length, 1, text);
+    assert(result.evidence.some((entry) => entry.id === 'link-credentials'), text);
+  }
+  assert.deepEqual(extractUrls('Write to person@example.com'), []);
+});
+
+test('unrelated negation cannot hide a credential request', () => {
+  for (const text of ['Do not delay, send your OTP.', 'Never share your OTP and send your password here.'])
+    assert(localScan(text, 'message').evidence.some((entry) => entry.id === 'credentials'), text);
+  for (const text of ['Do not send your OTP.', 'Never share your OTP or PIN.', 'কখনো কাউকে OTP দিন না।'])
+    assert(!localScan(text, 'message').evidence.some((entry) => entry.id === 'credentials'), text);
+});
+
+test('phone extraction accepts separators and Bengali country digits without consuming nearby amounts', () => {
+  assert.deepEqual(extractPhones('Call +৮৮০১৭১২৩৪৫৬৭৮ and 01712-345678. Fee 20 taka.'), ['+8801712345678']);
 });

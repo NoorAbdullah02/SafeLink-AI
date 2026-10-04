@@ -3,11 +3,16 @@ import { createStore } from './store.js';
 import { config } from './config.js';
 const store = createStore();
 const app = createApp(store);
-app.listen(config.port, '0.0.0.0', () =>
+app.listen(config.port, '0.0.0.0', (error?: Error) => {
+  if (error) {
+    console.error('SafeLink API failed to start: ' + error.message);
+    process.exitCode = 1;
+    return;
+  }
   console.log(
     `SafeLink API http://localhost:${config.port} · ${store.memory ? 'TEMPORARY DEMO STORAGE' : 'PostgreSQL'}`,
-  ),
-);
+  );
+});
 async function cleanup() {
   try {
     const cutoff = Date.now() - config.retentionDays * 86400000;

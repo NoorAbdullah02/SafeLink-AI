@@ -1,0 +1,73 @@
+import './setup.js';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { askCyberAssistant, getCyberExpertResponse } from '../server/assistant.js';
+import { sanitizeExternalText, privateHistoryResult } from '../server/privacy.js';
+import { localScan } from '../server/engine.js';
+
+test('assistant stays local without external opt-in even when a provider is configured', async () => {
+  const previous = process.env.LLM_API_KEY, previousFetch = globalThis.fetch;
+  process.env.LLM_API_KEY = 'test-key';
+  let requests = 0;
+  globalThis.fetch = async () => { requests++; throw new Error('Should not be contacted'); };
+  try {
+    const result = await askCyberAssistant('I shared my PIN');
+    assert.equal(result.source, 'local');
+    assert.equal(result.externalUsed, false);
+    assert.equal(requests, 0);
+  } finally { process.env.LLM_API_KEY = previous; globalThis.fetch = previousFetch; }
+});
+
+test('incident advice does not promise recovery or mislabel the women support line', () => {
+  const money = getCyberExpertResponse('I lost money to a bKash scam');
+  assert.match(money.reply, /Recovery is not guaranteed/);
+  const pin = getCyberExpertResponse('I shared my PIN');
+  assert.match(pin.reply, /do not rely on deliberately entering a wrong PIN/);
+  const contacts = getCyberExpertResponse('helpline');
+  assert.equal(contacts.hotlines.find((contact) => contact.number === '01320000888')?.name, 'Police Cyber Support for Women');
+  assert(contacts.hotlines.every((contact) => contact.source?.startsWith('https://')));
+  assert(!JSON.stringify(contacts).includes('CID'));
+  assert(!getCyberExpertResponse('জিডি কীভাবে করব?').reply.includes('সঠিক আইনি ধারাসহ'));
+});
+
+test('external redaction removes URL paths, emails, Bengali digits and labelled credentials', () => {
+  const result = sanitizeExternalText('Email me@example.com OTP ১২৩৪৫৬ password: secretword https://example.com/private-path?token=secret and bkash-login.io/reset/private-code');
+  for (const secret of ['me@example.com', '১২৩৪৫৬', 'secretword', 'private-path', 'token=secret', 'private-code']) assert(!result.includes(secret), secret);
+  assert(result.includes('https://example.com'));
+});
+
+test('privacy redaction is idempotent and preserves generic credential evidence', () => {
+  const generic = 'The message asks for an OTP, PIN or password.';
+  assert.equal(sanitizeExternalText(generic), generic);
+  assert.equal(sanitizeExternalText('Passwords and OTP protection matter.'), 'Passwords and OTP protection matter.');
+  const once = sanitizeExternalText('My OTP ১২৩৪৫৬ and password: secretword; token=privateToken. Email me@example.com at https://example.com/private?secret=value');
+  assert.equal(sanitizeExternalText(once), once);
+  assert(!once.includes('secretword'));
+  assert(!once.includes('privateToken'));
+  for (const placeholder of ['[secret removed]', '[number removed]', '[email removed]', '[link removed]'])
+    assert.equal(sanitizeExternalText('OTP ' + placeholder), 'OTP ' + placeholder);
+  const scan = localScan('Send your OTP or PIN immediately.', 'message');
+  const first = privateHistoryResult(scan), second = privateHistoryResult(first);
+  assert.deepEqual(second, first);
+  assert.equal(second.evidence.find((entry) => entry.id === 'credentials')?.detail, generic);
+  first.evidence.find((entry) => entry.id === 'credentials')!.detail = 'The message asks for an OTP, PIN [secret removed] removed] password.';
+  assert.equal(privateHistoryResult(first).evidence.find((entry) => entry.id === 'credentials')?.detail, generic);
+});
+
+test('assistant validates AI output and reports external submission when using a local fallback', async () => {
+  const previous = process.env.LLM_API_KEY, previousFetch = globalThis.fetch;
+  process.env.LLM_API_KEY = 'test-key';
+  let sent = '';
+  globalThis.fetch = async (_input, init) => {
+    sent = String(init?.body);
+    return new Response(JSON.stringify({ choices: [{ message: { content: 'Enter 3 wrong PINs to guarantee your money is safe.' } }] }), { status: 200 });
+  };
+  try {
+    const result = await askCyberAssistant('My OTP ১২৩৪৫৬ was stolen at https://example.com/reset/private?key=secret', [], true);
+    assert.equal(result.source, 'local');
+    assert.equal(result.externalUsed, true);
+    assert(!sent.includes('১২৩৪৫৬'));
+    assert(!sent.includes('key=secret'));
+    assert(!sent.includes('/reset/private'));
+  } finally { process.env.LLM_API_KEY = previous; globalThis.fetch = previousFetch; }
+});

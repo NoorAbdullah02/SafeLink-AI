@@ -1,6 +1,8 @@
 import { Landing } from './Landing';
 import { useEffect, useState, useRef, type FormEvent } from 'react';
-import { useModalFocus } from './useModalFocus';
+import { setBaseInert, useModalFocus } from './useModalFocus';
+import { useApiResource } from './useApiResource';
+import { readTheme, applyTheme } from './theme';
 import * as Tabs from '@radix-ui/react-tabs';
 import {
   ShieldCheck,
@@ -53,7 +55,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Button } from './components/ui/button';
-import { api, post } from './api';
+import { advanceSessionVersion, api, ApiError, post } from './api';
 import { categories, demos, type ScanResult, type ScanKind } from '../shared/types';
 type User = {
   id: string;
@@ -64,10 +66,18 @@ type User = {
   simpleMode: boolean;
 };
 type Page =
-  'scanner' | 'dashboard' | 'directory' | 'history' | 'community' | 'family' | 'settings' | 'demo' | 'admin';
+  | 'scanner'
+  | 'dashboard'
+  | 'directory'
+  | 'history'
+  | 'community'
+  | 'family'
+  | 'settings'
+  | 'demo'
+  | 'admin';
 const nav = [
   { id: 'scanner', label: 'Scan center', icon: ScanLine },
-  { id: 'dashboard', label: 'Overview & Radar', icon: LayoutDashboard },
+  { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
   { id: 'directory', label: 'Helpline Directory', icon: PhoneCall },
   { id: 'history', label: 'Scan history', icon: History },
   { id: 'community', label: 'Community', icon: Users },
@@ -88,6 +98,17 @@ const kindInfo = {
   qr: { title: 'QR code', icon: QrCode, placeholder: '' },
   screenshot: { title: 'Screenshot', icon: ImagePlus, placeholder: '' },
 };
+function scrollToElement(id: string) {
+  document.getElementById(id)?.scrollIntoView({
+    behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+    block: 'start',
+  });
+}
+function detectScanKind(value: string): ScanKind {
+  return /^(?:https?:\/\/|www\.)/i.test(value) || (!/\s/.test(value) && value.includes('.'))
+    ? 'url'
+    : 'message';
+}
 function RiskPill({ score, level }: { score: number; level: string }) {
   return (
     <span
@@ -111,12 +132,24 @@ function Empty({ title, text }: { title: string; text: string }) {
 }
 export default function App() {
   const [historySelection, setHistorySelection] = useState<ScanResult | null>(null);
-  const [workspace, setWorkspace] = useState(() => location.hash === '#workspace' || new URLSearchParams(location.search).has('action'));
-  useEffect(() => { const sync = () => setWorkspace(location.hash === '#workspace' || new URLSearchParams(location.search).has('action')); window.addEventListener('hashchange', sync); return () => window.removeEventListener('hashchange', sync); }, []);
+  const [workspace, setWorkspace] = useState(
+    () => location.hash === '#workspace' || new URLSearchParams(location.search).has('action'),
+  );
+  useEffect(() => {
+    const sync = () =>
+      setWorkspace(
+        location.hash === '#workspace' || new URLSearchParams(location.search).has('action'),
+      );
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
   const [smallScreen, setSmallScreen] = useState(() => matchMedia('(max-width: 700px)').matches);
   useEffect(() => {
     const media = matchMedia('(max-width: 700px)');
-    const update = () => setSmallScreen(media.matches);
+    const update = () => {
+      setSmallScreen(media.matches);
+      if (!media.matches) setMobileMenu(false);
+    };
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
   }, []);
@@ -124,26 +157,86 @@ export default function App() {
     [user, setUser] = useState<User | null>(null),
     [health, setHealth] = useState<any>(null),
     [mobileMenu, setMobileMenu] = useState(false),
-    [dark, setDark] = useState(localStorage.getItem('theme') === 'dark'),
+    [dark, setDark] = useState(readTheme),
     [notice, setNotice] = useState(''),
     [authOpen, setAuthOpen] = useState(false),
     [refresh, setRefresh] = useState(0),
     [preset, setPreset] = useState<{ kind: ScanKind; text: string } | null>(null),
     [globalPanicOpen, setGlobalPanicOpen] = useState(false),
-    [assistantOpen, setAssistantOpen] = useState(false);
+    [assistantOpen, setAssistantOpen] = useState(false),
+    [simpleBusy, setSimpleBusy] = useState(false);
+  const sessionRevision = useRef(0);
+  const sessionUser = useRef<User | null>(null);
+  const simpleRequest = useRef(false);
+  function replaceSession(next: User | null) {
+    sessionRevision.current += 1;
+    advanceSessionVersion();
+    sessionUser.current = next;
+    setUser(next);
+  }
+  const renderedSession = sessionRevision.current;
+  function updateAccount(next: User | null, field?: 'name' | 'simpleMode') {
+    if (sessionRevision.current !== renderedSession || !sessionUser.current) return false;
+    if (next && next.id !== sessionUser.current.id) return false;
+    if (!next) replaceSession(null);
+    else {
+      const updated = field ? { ...sessionUser.current, [field]: next[field] } : next;
+      sessionUser.current = updated;
+      setUser(updated);
+    }
+    return true;
+  }
   const [action] = useState(() => new URLSearchParams(location.search).get('action'));
+  const menuRef = useModalFocus(() => setMobileMenu(false), smallScreen && mobileMenu && workspace);
   useEffect(() => {
+    if (menuRef.current) setBaseInert(menuRef.current, smallScreen && !mobileMenu);
+  }, [smallScreen, mobileMenu, workspace]);
+  function restoreSession(signal?: AbortSignal, clearExpired = false) {
+    const expectedSession = sessionRevision.current;
+    return api<User>('/me', { signal })
+      .then((next) => {
+        if (!signal?.aborted && sessionRevision.current === expectedSession) replaceSession(next);
+      })
+      .catch((error: Error) => {
+        if (signal?.aborted || sessionRevision.current !== expectedSession) return;
+        if (error instanceof ApiError && error.status === 401) {
+          if (clearExpired && sessionUser.current) replaceSession(null);
+        } else {
+          setNotice('Your account could not be loaded. Retry the connection or reload.');
+        }
+      });
+  }
+  const checkHealth = () => {
     api('/health')
       .then(setHealth)
       .catch(() => setHealth({ offline: true }));
-    api('/me')
-      .then(setUser)
-      .catch(() => {});
-  }, []);
-  useEffect(() => { setHistorySelection(null); }, [user?.id]);
+    if (!sessionUser.current) void restoreSession();
+  };
   useEffect(() => {
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    localStorage.setItem('theme', dark ? 'dark' : 'light');
+    const controller = new AbortController();
+    api('/health', { signal: controller.signal })
+      .then(setHealth)
+      .catch(() => {
+        if (!controller.signal.aborted) setHealth({ offline: true });
+      });
+    void restoreSession(controller.signal);
+    window.addEventListener('online', checkHealth);
+    const sessionExpired = () => {
+      replaceSession(null);
+      setNotice('Your session ended. Sign in again to save activity and manage your account.');
+    };
+    window.addEventListener('safelink:session-expired', sessionExpired);
+    return () => {
+      controller.abort();
+      window.removeEventListener('online', checkHealth);
+      window.removeEventListener('safelink:session-expired', sessionExpired);
+    };
+  }, []);
+  useEffect(() => {
+    setHistorySelection(null);
+  }, [user?.id]);
+  useEffect(() => {
+    applyTheme(dark);
   }, [dark]);
   useEffect(() => {
     if (!notice) return;
@@ -154,28 +247,57 @@ export default function App() {
     setPage(p);
     setMobileMenu(false);
   }
+  const previousPage = useRef(page);
+  useEffect(() => {
+    if (previousPage.current === page) return;
+    previousPage.current = page;
+    document.getElementById('main')?.focus({ preventScroll: true });
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [page]);
+  function openAuth() {
+    setMobileMenu(false);
+    setAuthOpen(true);
+  }
   const props = {
     user,
     notify: setNotice,
     refresh: () => setRefresh((x) => x + 1),
-    requireAuth: () => setAuthOpen(true),
+    requireAuth: openAuth,
+    emailAvailable: Boolean(health?.email),
   };
-  if (!workspace) return <Landing dark={dark} toggleTheme={() => setDark(!dark)} enter={() => { location.hash = 'workspace'; setWorkspace(true); window.scrollTo(0,0); }} />;
+  if (!workspace)
+    return (
+      <Landing
+        dark={dark}
+        toggleTheme={() => setDark(!dark)}
+        enter={() => {
+          location.hash = 'workspace';
+          setWorkspace(true);
+          window.scrollTo(0, 0);
+        }}
+      />
+    );
   return (
     <div className={'app ' + (user?.simpleMode ? 'simple' : '')}>
-      <a className="skip" href="#main">
+      <a
+        className="skip"
+        href="#main"
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById('main')?.focus({ preventScroll: true });
+          scrollToElement('main');
+        }}
+      >
         Skip to content
       </a>
-      <aside
-        id="main-navigation"
-        inert={smallScreen && !mobileMenu}
-        className={'sidebar ' + (mobileMenu ? 'open' : '')}
-      >
+      <aside id="main-navigation" ref={menuRef} className={'sidebar ' + (mobileMenu ? 'open' : '')}>
         <a
           href="#"
           onClick={(e) => {
             e.preventDefault();
-            location.hash = ''; setWorkspace(false); window.scrollTo(0,0);
+            location.hash = '';
+            setWorkspace(false);
+            window.scrollTo(0, 0);
           }}
           className="brand"
         >
@@ -200,6 +322,7 @@ export default function App() {
             <button
               key={n.id}
               className={'nav-item ' + (page === n.id ? 'active' : '')}
+              aria-current={page === n.id ? 'page' : undefined}
               onClick={() => go(n.id)}
             >
               <n.icon size={19} />
@@ -219,18 +342,23 @@ export default function App() {
           </div>
           <button
             className={'nav-item ' + (page === 'settings' ? 'active' : '')}
+            aria-current={page === 'settings' ? 'page' : undefined}
             onClick={() => go('settings')}
           >
             <Settings size={19} />
             Settings
           </button>
           {user?.role === 'admin' && (
-            <button className="nav-item" onClick={() => go('admin')}>
+            <button
+              className={'nav-item ' + (page === 'admin' ? 'active' : '')}
+              aria-current={page === 'admin' ? 'page' : undefined}
+              onClick={() => go('admin')}
+            >
               <LockKeyhole size={19} />
               Admin panel
             </button>
           )}
-          <button className="profile" onClick={() => (user ? go('settings') : setAuthOpen(true))}>
+          <button className="profile" onClick={() => (user ? go('settings') : openAuth())}>
             <span className="avatar">{user ? user.name[0].toUpperCase() : 'G'}</span>
             <span>
               <strong>{user?.name || 'Guest workspace'}</strong>
@@ -240,7 +368,7 @@ export default function App() {
           </button>
         </div>
       </aside>
-      {mobileMenu && (
+      {smallScreen && mobileMenu && (
         <button
           className="menu-backdrop"
           aria-label="Close menu"
@@ -280,11 +408,11 @@ export default function App() {
             <button
               type="button"
               className="panic-btn-header"
-              title="জরুরি একাউন্ট ফ্রিজ ও প্রতারণা লক প্রোটোকল"
+              title="প্রতারণার পর করণীয় ও সহায়তার যোগাযোগ"
               onClick={() => setGlobalPanicOpen(true)}
             >
               <ShieldAlert size={15} />
-              <span>🚨 একাউন্ট ফ্রিজ</span>
+              <span>জরুরি সহায়তা</span>
             </button>
             <span className={'connection ' + (health?.offline ? 'offline' : '')}>
               <span />
@@ -304,13 +432,13 @@ export default function App() {
               {dark ? <Sun size={19} /> : <Moon size={19} />}
             </button>
             {!user && (
-              <Button variant="outline" size="sm" onClick={() => setAuthOpen(true)}>
+              <Button variant="outline" size="sm" onClick={openAuth}>
                 Sign in <ArrowUpRight size={14} />
               </Button>
             )}
           </div>
         </header>
-        <main id="main">
+        <main id="main" key={user?.id || 'guest'} tabIndex={-1}>
           {health?.storage === 'temporary-memory' && (
             <div className="demo-banner">
               <Activity size={15} />
@@ -323,6 +451,9 @@ export default function App() {
           {health?.offline && (
             <div className="error">
               The scanner cannot reach the backend. Check your connection and retry.
+              <Button variant="outline" size="sm" onClick={checkHealth}>
+                Retry connection
+              </Button>
             </div>
           )}
           {page === 'scanner' && (
@@ -345,26 +476,42 @@ export default function App() {
             />
           )}
           {page === 'directory' && <HelplineDirectory notify={props.notify} />}
-          {page === 'history' && <HistoryPage {...props} version={refresh} initialSelection={historySelection} />}
-          {page === 'community' && <Community {...props} />}
+          {page === 'history' && (
+            <HistoryPage {...props} version={refresh} initialSelection={historySelection} />
+          )}
+          {page === 'community' && <Community {...props} health={health} />}
           {page === 'family' && (
             <Family
               {...props}
+              health={health}
+              simpleBusy={simpleBusy}
               onSimple={async () => {
-                if (!user) return setAuthOpen(true);
+                if (!user) return openAuth();
+                if (simpleRequest.current) return;
+                simpleRequest.current = true;
+                setSimpleBusy(true);
                 try {
                   const u = await api<User>('/me', {
                     method: 'PATCH',
                     body: JSON.stringify({ simpleMode: !user.simpleMode }),
                   });
-                  setUser(u);
+                  updateAccount(u, 'simpleMode');
                 } catch (e) {
                   setNotice((e as Error).message);
+                } finally {
+                  simpleRequest.current = false;
+                  setSimpleBusy(false);
                 }
               }}
             />
           )}
-          {page === 'settings' && <SettingsPage {...props} health={health} setUser={setUser} />}
+          {page === 'settings' && (
+            <SettingsPage
+              {...props}
+              health={health}
+              setUser={(next) => updateAccount(next, 'name')}
+            />
+          )}
           {page === 'demo' && (
             <>
               <PageTitle
@@ -393,9 +540,27 @@ export default function App() {
               <div className="card">
                 <h3>QR & screenshot examples</h3>
                 <p>
-                  Use the images in the project’s demo-assets folder. Upload the QR image in QR code
-                  mode or the message image in Screenshot mode. Neither sample opens a destination.
+                  Download a controlled image below, then upload it in QR code or Screenshot mode.
+                  Both use reserved example domains. The scanner does not open their destinations.
                 </p>
+                <div className="report-modal-actions">
+                  <a
+                    className="button outline"
+                    href="/demo-assets/controlled-qr.png"
+                    download="safelink-example-qr.png"
+                  >
+                    <QrCode size={16} />
+                    Download QR example
+                  </a>
+                  <a
+                    className="button outline"
+                    href="/demo-assets/controlled-message.png"
+                    download="safelink-example-message.png"
+                  >
+                    <ImagePlus size={16} />
+                    Download screenshot
+                  </a>
+                </div>
               </div>
             </>
           )}
@@ -421,7 +586,7 @@ export default function App() {
         <AuthModal
           onClose={() => setAuthOpen(false)}
           onUser={(u) => {
-            setUser(u);
+            replaceSession(u);
             setAuthOpen(false);
             setRefresh((x) => x + 1);
           }}
@@ -429,20 +594,26 @@ export default function App() {
         />
       )}
       {(action === 'verify' || action === 'reset') && (
-        <AccountAction action={action} notify={setNotice} />
+        <AccountAction
+          action={action}
+          notify={setNotice}
+          onConfirmed={() => {
+            void restoreSession(undefined, true);
+          }}
+        />
       )}
       {globalPanicOpen && (
         <EmergencyFreezeModal
           onClose={() => setGlobalPanicOpen(false)}
           onOpenGd={() => {
             setGlobalPanicOpen(false);
-            setNotice('কোনো স্ক্যান রেজাল্ট থেকে পুলিশ জিডি তৈরি করতে স্ক্যানারে লিঙ্ক বা মেসেজ চেক করুন।');
+            setNotice(
+              'কোনো স্ক্যান রেজাল্ট থেকে পুলিশ জিডি তৈরি করতে স্ক্যানারে লিঙ্ক বা মেসেজ চেক করুন।',
+            );
           }}
         />
       )}
-      {assistantOpen && (
-        <CyberAssistantModal onClose={() => setAssistantOpen(false)} />
-      )}
+      {assistantOpen && <CyberAssistantModal onClose={() => setAssistantOpen(false)} />}
       <button
         type="button"
         className="floating-assistant-btn"
@@ -462,6 +633,7 @@ type Props = {
   notify: (s: string) => void;
   refresh: () => void;
   requireAuth: () => void;
+  emailAvailable?: boolean;
 };
 function PageTitle({ eyebrow, title, text }: { eyebrow: string; title: string; text: string }) {
   return (
@@ -493,78 +665,87 @@ function Scanner({
     [save, setSave] = useState(true),
     [busy, setBusy] = useState(false),
     [result, setResult] = useState<ScanResult | null>(null),
-    [error, setError] = useState(''),
-    [clipboardPrompt, setClipboardPrompt] = useState<{ text: string; preview: string; kind: ScanKind } | null>(null);
+    [error, setError] = useState('');
+  const requestRef = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      requestRef.current?.abort();
+    };
+  }, []);
 
-  const executeDemoScan = async (demoKind: ScanKind, demoText: string) => {
-    setKind(demoKind);
-    setText(demoText);
-    setFile(null);
+  async function runScan(scanKind: ScanKind, scanText: string, scanFile: File | null = null) {
+    if (requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
     setError('');
     setBusy(true);
     setResult(null);
-    document.getElementById('scan-input')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     try {
-      const r = await post('/scans', { kind: demoKind, text: demoText, external, save });
+      let r: ScanResult;
+      if (scanKind === 'qr' || scanKind === 'screenshot') {
+        if (!scanFile) throw new Error('Choose an image first.');
+        if (scanFile.size > 5 * 1024 * 1024) throw new Error('Choose an image smaller than 5 MB.');
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(scanFile.type))
+          throw new Error('Choose a PNG, JPEG or WebP image.');
+        const body = new FormData();
+        body.append('image', scanFile);
+        body.append('kind', scanKind);
+        body.append('external', String(external));
+        body.append('save', String(save && Boolean(user)));
+        r = await api('/scans/image', { method: 'POST', body, signal: controller.signal });
+      } else {
+        if (!scanText.trim()) throw new Error('Paste a link or message first.');
+        if (scanText.length > 10000) throw new Error('Keep your input within 10,000 characters.');
+        r = await api('/scans', {
+          method: 'POST',
+          body: JSON.stringify({
+            kind: scanKind,
+            text: scanText,
+            external,
+            save: save && Boolean(user),
+          }),
+          signal: controller.signal,
+        });
+      }
+      if (!mounted.current || controller.signal.aborted) return;
       setResult(r);
       onScan();
-      setTimeout(() => {
-        document.getElementById('scan-result-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
     } catch (e) {
-      setError((e as Error).message);
+      if (mounted.current && !controller.signal.aborted) setError((e as Error).message);
     } finally {
-      setBusy(false);
+      if (requestRef.current === controller) requestRef.current = null;
+      if (mounted.current) setBusy(false);
     }
+  }
+
+  const executeDemoScan = async (demoKind: ScanKind, demoText: string) => {
+    if (requestRef.current) return;
+    setKind(demoKind);
+    setText(demoText);
+    setFile(null);
+    scrollToElement('scan-input');
+    await runScan(demoKind, demoText);
   };
   useEffect(() => {
     if (preset) {
       setKind(preset.kind);
       setText(preset.text);
+      setFile(null);
+      setError('');
       setResult(null);
     }
   }, [preset]);
 
-  useEffect(() => {
-    const checkClipboard = async () => {
-      try {
-        if (!navigator.clipboard?.readText) return;
-        const clipText = (await navigator.clipboard.readText()).trim();
-        if (!clipText || clipText === text || clipText.length < 5) return;
-        const isUrl =
-          clipText.startsWith('http://') ||
-          clipText.startsWith('https://') ||
-          clipText.startsWith('www.') ||
-          (!clipText.includes('\n') && !clipText.includes(' ') && clipText.includes('.') && clipText.length > 6);
-        const isSuspicious =
-          isUrl ||
-          clipText.includes('বিকাশ') ||
-          clipText.includes('নগদ') ||
-          clipText.includes('bkash') ||
-          clipText.includes('nagad') ||
-          clipText.includes('লটারি') ||
-          clipText.includes('বোনাস') ||
-          clipText.includes('টাকা') ||
-          clipText.toLowerCase().includes('pin') ||
-          clipText.toLowerCase().includes('otp');
-
-        if (isSuspicious) {
-          setClipboardPrompt({
-            text: clipText,
-            preview: clipText.length > 65 ? clipText.slice(0, 65) + '…' : clipText,
-            kind: isUrl ? 'url' : 'message',
-          });
-        }
-      } catch {}
-    };
-    window.addEventListener('focus', checkClipboard);
-    return () => window.removeEventListener('focus', checkClipboard);
-  }, [text]);
-
   async function pasteAndAutoScan() {
+    if (busy || requestRef.current) return;
     try {
       if (!navigator.clipboard?.readText) {
-        notify('আপনার ব্রাউজারে ক্লিপবোর্ড সরাসরি পড়ার সমর্থন নেই। ইনপুট বক্সে ম্যানুয়ালি পেস্ট করুন।');
+        notify(
+          'আপনার ব্রাউজারে ক্লিপবোর্ড সরাসরি পড়ার সমর্থন নেই। ইনপুট বক্সে ম্যানুয়ালি পেস্ট করুন।',
+        );
         return;
       }
       const clip = (await navigator.clipboard.readText()).trim();
@@ -572,60 +753,19 @@ function Scanner({
         notify('ক্লিপবোর্ডে কোনো টেক্সট পাওয়া যায়নি।');
         return;
       }
-      const isUrl =
-        clip.startsWith('http://') ||
-        clip.startsWith('https://') ||
-        clip.startsWith('www.') ||
-        (!clip.includes('\n') && !clip.includes(' ') && clip.includes('.'));
-      const detectedKind: ScanKind = isUrl ? 'url' : 'message';
+      if (!mounted.current || requestRef.current) return;
+      const detectedKind = detectScanKind(clip);
       setKind(detectedKind);
       setText(clip);
-      setClipboardPrompt(null);
-      setBusy(true);
-      setError('');
-      setResult(null);
-      try {
-        const r = await post('/scans', { kind: detectedKind, text: clip, external, save });
-        setResult(r);
-        onScan();
-        setTimeout(() => {
-          document.getElementById('scan-result-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 100);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setBusy(false);
-      }
+      setFile(null);
+      await runScan(detectedKind, clip);
     } catch {
       notify('ক্লিপবোর্ড পড়ার অনুমতি দিন অথবা ইনপুট বক্সে ম্যানুয়ালি পেস্ট করুন।');
     }
   }
   async function scan(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
-    setError('');
-    setResult(null);
-    try {
-      let r: ScanResult;
-      if (kind === 'qr' || kind === 'screenshot') {
-        if (!file) throw new Error('Choose an image first.');
-        const body = new FormData();
-        body.append('image', file);
-        body.append('kind', kind);
-        body.append('external', String(external));
-        body.append('save', String(save));
-        r = await api('/scans/image', { method: 'POST', body });
-      } else r = await post('/scans', { kind, text, external, save });
-      setResult(r);
-      onScan();
-      setTimeout(() => {
-        document.getElementById('scan-result-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    await runScan(kind, text, file);
   }
   return (
     <>
@@ -656,20 +796,27 @@ function Scanner({
             </span>
           </div>
 
-          <div className="quick-demo-pills-row" aria-label="Quick live test scenarios">
+          <div className="quick-demo-pills-row" aria-label="Quick example scenarios">
             <span className="pills-title">⚡ কুইক ডেমো টেস্ট:</span>
             <button
               type="button"
               className="quick-demo-pill danger"
-              onClick={() => executeDemoScan('url', 'https://bkash-reward.xyz/login')}
+              disabled={busy}
+              onClick={() => executeDemoScan('url', 'https://bkash-reward.example/login')}
               title="bKash Spoof লিংক সরাসরি টেস্ট করুন"
             >
-              <span>🔗 bKash Spoof</span>
+              <span>Look-alike link</span>
             </button>
             <button
               type="button"
               className="quick-demo-pill warning"
-              onClick={() => executeDemoScan('message', 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.')}
+              disabled={busy}
+              onClick={() =>
+                executeDemoScan(
+                  'message',
+                  'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.',
+                )
+              }
               title="Banglish OTP ফিশিং সরাসরি টেস্ট করুন"
             >
               <span>💬 Banglish PIN</span>
@@ -677,7 +824,13 @@ function Scanner({
             <button
               type="button"
               className="quick-demo-pill warning"
-              onClick={() => executeDemoScan('message', 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।')}
+              disabled={busy}
+              onClick={() =>
+                executeDemoScan(
+                  'message',
+                  'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।',
+                )
+              }
               title="Bangla Lottery প্রতারণা সরাসরি টেস্ট করুন"
             >
               <span>🎁 ৫০,০০০ টাকা লটারি</span>
@@ -685,10 +838,11 @@ function Scanner({
             <button
               type="button"
               className="quick-demo-pill success"
+              disabled={busy}
               onClick={() => executeDemoScan('url', 'https://www.bkash.com')}
-              title="অফিসিয়াল নিরাপদ ওয়েবসাইট টেস্ট করুন"
+              title="পরিচিত ডোমেনের উদাহরণ পরীক্ষা করুন"
             >
-              <span>✅ অফিসিয়াল সাইট</span>
+              <span>Known domain</span>
             </button>
           </div>
 
@@ -701,247 +855,222 @@ function Scanner({
               setFile(null);
             }}
           >
-            {clipboardPrompt && (
-              <div className="clipboard-prompt-card">
-                <div className="clipboard-prompt-info">
-                  <span className="clipboard-icon-badge">
-                    <Copy size={16} />
-                  </span>
-                  <div>
-                    <strong>ক্লিপবোর্ডে কপি করা লিঙ্ক/টেক্সট শনাক্ত হয়েছে:</strong>
-                    <p className="clipboard-prompt-snippet">"{clipboardPrompt.preview}"</p>
-                  </div>
-                </div>
-                <div className="clipboard-prompt-buttons">
-                  <button
-                    type="button"
-                    className="btn-clipboard-quick-scan"
-                    onClick={() => {
-                      const { kind: k, text: t } = clipboardPrompt;
-                      setKind(k);
-                      setText(t);
-                      setClipboardPrompt(null);
-                      setBusy(true);
-                      setError('');
-                      setResult(null);
-                      post('/scans', { kind: k, text: t, external, save })
-                        .then((r) => {
-                          setResult(r);
-                          onScan();
-                        })
-                        .catch((err) => setError((err as Error).message))
-                        .finally(() => setBusy(false));
-                    }}
-                  >
-                    <Zap size={14} /> ⚡ Instant AI Scan
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-clipboard-dismiss"
-                    onClick={() => setClipboardPrompt(null)}
-                    aria-label="Dismiss"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-              </div>
-            )}
             <Tabs.List className="scan-tabs" aria-label="Content type">
               {Object.entries(kindInfo).map(([k, v]) => (
-                <Tabs.Trigger key={k} value={k}>
+                <Tabs.Trigger key={k} value={k} disabled={busy}>
                   <v.icon size={19} />
                   {v.title}
                 </Tabs.Trigger>
               ))}
             </Tabs.List>
-            <form onSubmit={scan}>
-              <div className="input-label-row">
-                <label className="input-label" htmlFor="scan-input">
-                  {kind === 'url'
-                    ? 'Link to analyze'
-                    : kind === 'message'
-                      ? 'Message to analyze'
-                      : kind === 'qr'
-                        ? 'QR code image'
-                        : 'Screenshot to analyze'}
-                </label>
-                {(kind === 'url' || kind === 'message') && (
-                  <button
-                    type="button"
-                    className="btn-paste-quick"
-                    onClick={pasteAndAutoScan}
-                    title="ক্লিপবোর্ড থেকে সরাসরি পেস্ট ও এআই স্ক্যান করুন"
-                  >
-                    <Copy size={13} />
-                    <span>📋 Paste & Scan</span>
-                  </button>
-                )}
-              </div>
-              {kind === 'url' || kind === 'message' ? (
-                <div className={'scan-input ' + (kind === 'message' ? 'message' : '')}>
-                  <span>{kind === 'url' ? <Link size={19} /> : <MessageSquare size={19} />}</span>
-                  <textarea
-                    id="scan-input"
-                    rows={kind === 'url' ? 3 : 5}
-                    maxLength={10000}
-                    placeholder={kindInfo[kind].placeholder}
-                    value={text}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setText(val);
-                      const trimmed = val.trim();
-                      if (trimmed) {
-                        const isUrl =
-                          trimmed.startsWith('http://') ||
-                          trimmed.startsWith('https://') ||
-                          trimmed.startsWith('www.') ||
-                          (!trimmed.includes(' ') && !trimmed.includes('\n') && trimmed.includes('.'));
-                        if (isUrl && kind !== 'url') setKind('url');
-                        else if (!isUrl && trimmed.includes(' ') && kind !== 'message') setKind('message');
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                        e.preventDefault();
-                        if (text.trim() && !busy) {
-                          scan(e as any);
-                        }
-                      }
-                    }}
-                    required
-                  />
-                  {text && (
+            <Tabs.Content value={kind}>
+              <form onSubmit={scan} aria-busy={busy}>
+                <div className="input-label-row">
+                  <label className="input-label" htmlFor="scan-input">
+                    {kind === 'url'
+                      ? 'Link to analyze'
+                      : kind === 'message'
+                        ? 'Message to analyze'
+                        : kind === 'qr'
+                          ? 'QR code image'
+                          : 'Screenshot to analyze'}
+                  </label>
+                  {(kind === 'url' || kind === 'message') && (
                     <button
                       type="button"
-                      className="btn-textarea-clear"
-                      onClick={() => {
-                        setText('');
-                        setResult(null);
-                      }}
-                      title="Clear text"
-                      aria-label="Clear text"
+                      className="btn-paste-quick"
+                      disabled={busy}
+                      onClick={pasteAndAutoScan}
+                      title="ক্লিপবোর্ড থেকে সরাসরি পেস্ট ও এআই স্ক্যান করুন"
                     >
-                      <X size={15} />
+                      <Copy size={13} />
+                      <span>📋 Paste & Scan</span>
                     </button>
                   )}
-                  <span className="char-count">{text.length.toLocaleString()} / 10,000</span>
                 </div>
-              ) : (
-                <label className="upload-zone" htmlFor="scan-input">
-                  <span className="upload-icon">
-                    <Upload size={25} />
-                  </span>
-                  <strong>{file ? file.name : 'Choose an image to scan'}</strong>
-                  <span>PNG, JPEG or WebP · Up to 5 MB</span>
-                  <input
-                    id="scan-input"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    onChange={(e) => setFile(e.target.files?.[0] || null)}
-                    required
-                  />
-                  <small>
-                    {kind === 'qr'
-                      ? 'The QR destination will be decoded without opening it.'
-                      : 'Text is extracted with English + বাংলা OCR. You can review what was read.'}
-                  </small>
-                </label>
-              )}
-              <div className="scan-options">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={external}
-                    onChange={(e) => setExternal(e.target.checked)}
-                  />
-                  <span>
-                    Use external AI & threat checks{' '}
+                {kind === 'url' || kind === 'message' ? (
+                  <div className={'scan-input ' + (kind === 'message' ? 'message' : '')}>
+                    <span>{kind === 'url' ? <Link size={19} /> : <MessageSquare size={19} />}</span>
+                    <textarea
+                      id="scan-input"
+                      rows={kind === 'url' ? 3 : 5}
+                      maxLength={10000}
+                      placeholder={kindInfo[kind].placeholder}
+                      value={text}
+                      disabled={busy}
+                      onChange={(e) => {
+                        setText(e.target.value);
+                        setResult(null);
+                        setError('');
+                      }}
+                      onKeyDown={(e) => {
+                        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                          e.preventDefault();
+                          if (text.trim() && !busy) {
+                            scan(e as any);
+                          }
+                        }
+                      }}
+                      required
+                    />
+                    {text && (
+                      <button
+                        type="button"
+                        className="btn-textarea-clear"
+                        disabled={busy}
+                        onClick={() => {
+                          setText('');
+                          setResult(null);
+                        }}
+                        title="Clear text"
+                        aria-label="Clear text"
+                      >
+                        <X size={15} />
+                      </button>
+                    )}
+                    <span className="char-count">{text.length.toLocaleString()} / 10,000</span>
+                  </div>
+                ) : (
+                  <label className="upload-zone" htmlFor="scan-input">
+                    <span className="upload-icon">
+                      <Upload size={25} />
+                    </span>
+                    <strong>{file ? file.name : 'Choose an image to scan'}</strong>
+                    <span>PNG, JPEG or WebP · Up to 5 MB</span>
+                    <input
+                      id="scan-input"
+                      key={kind}
+                      type="file"
+                      disabled={busy}
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(e) => {
+                        setFile(e.target.files?.[0] || null);
+                        setResult(null);
+                        setError('');
+                      }}
+                      required
+                    />
                     <small>
-                      Sends text/URLs to configured providers. Remove private information first.
+                      {kind === 'qr'
+                        ? 'The QR destination will be decoded without opening it.'
+                        : 'Text is extracted with English + বাংলা OCR. You can review what was read.'}
                     </small>
-                  </span>
-                </label>
-                {user && (
+                  </label>
+                )}
+                <div className="scan-options">
                   <label>
                     <input
                       type="checkbox"
-                      checked={save}
-                      onChange={(e) => setSave(e.target.checked)}
-                    />{' '}
-                    Save a redacted result to my history
+                      checked={external}
+                      disabled={busy}
+                      onChange={(e) => setExternal(e.target.checked)}
+                    />
+                    <span>
+                      Use external AI & threat checks{' '}
+                      <small>
+                        Sends text/URLs to configured providers. Remove private information first.
+                      </small>
+                    </span>
                   </label>
-                )}
-              </div>
-              {error && (
-                <p className="error" role="alert">
-                  {error}
-                </p>
-              )}
-              <div className="scan-submit">
-                <span>
-                  <ShieldCheck size={15} /> Links are never opened automatically
-                </span>
-                <div className="scan-submit-actions">
-                  <button
-                    type="button"
-                    className="btn-paste-autoscan"
-                    onClick={pasteAndAutoScan}
-                    title="ক্লিপবোর্ড থেকে লিঙ্ক বা টেক্সট পেস্ট করে সরাসরি এআই স্ক্যান চালান"
-                  >
-                    <Copy size={16} />
-                    <span>📋 Paste & Scan</span>
-                  </button>
-                  <Button type="submit" disabled={busy || health?.offline}>
-                    {busy ? <Loader2 className="spin" size={18} /> : <ScanLine size={18} />}{' '}
-                    {busy ? 'Analyzing…' : 'Scan Now'} {!busy && <ArrowRight size={17} />}
-                  </Button>
+                  {user && (
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={save}
+                        disabled={busy}
+                        onChange={(e) => setSave(e.target.checked)}
+                      />{' '}
+                      Save a redacted result to my history
+                    </label>
+                  )}
                 </div>
-              </div>
-            </form>
+                {error && (
+                  <p className="error" role="alert">
+                    {error}
+                  </p>
+                )}
+                <div className="scan-submit">
+                  <span>
+                    <ShieldCheck size={15} /> Links are never opened automatically
+                  </span>
+                  <div className="scan-submit-actions">
+                    <button
+                      type="button"
+                      className="btn-paste-autoscan"
+                      disabled={busy}
+                      onClick={pasteAndAutoScan}
+                      title="ক্লিপবোর্ড থেকে লিঙ্ক বা টেক্সট পেস্ট করে সরাসরি এআই স্ক্যান চালান"
+                    >
+                      <Copy size={16} />
+                      <span>📋 Paste & Scan</span>
+                    </button>
+                    <Button type="submit" disabled={busy || health?.offline}>
+                      {busy ? <Loader2 className="spin" size={18} /> : <ScanLine size={18} />}{' '}
+                      {busy ? 'Analyzing…' : 'Scan Now'} {!busy && <ArrowRight size={17} />}
+                    </Button>
+                  </div>
+                </div>
+              </form>
+            </Tabs.Content>
           </Tabs.Root>
           <div className="demo-scenarios-panel">
             <div className="demo-scenarios-header">
               <div>
-                <span className="eyebrow">⚡ 1-CLICK COMPETITION DEMO SCENARIOS</span>
-                <h3>Instant Test Cards (Tap any card to analyze)</h3>
+                <span className="eyebrow">CONTROLLED EXAMPLES</span>
+                <h3>Try an example with the real scanner</h3>
               </div>
-              <span className="demo-badge">4 LIVE SAMPLES · TAP TO AUTO-SCAN</span>
+              <span className="demo-badge">4 EXAMPLES · SAME SCAN ENGINE</span>
             </div>
             <div className="demo-cards-grid">
               <button
                 type="button"
                 className="demo-scenario-card danger"
-                onClick={() => executeDemoScan('url', 'https://bkash-reward.xyz/login')}
+                disabled={busy}
+                onClick={() => executeDemoScan('url', 'https://bkash-reward.example/login')}
                 title="Tap to automatically analyze this bKash spoof link"
               >
                 <div className="demo-card-top">
                   <span className="demo-icon-wrap">🔗</span>
-                  <span className="demo-tag danger">HOMOGRAPH SPOOF</span>
+                  <span className="demo-tag danger">LOOK-ALIKE DOMAIN</span>
                 </div>
                 <strong>bKash Spoof Link</strong>
-                <p className="demo-preview">https://bkash-reward.xyz/login</p>
+                <p className="demo-preview">https://bkash-reward.example/login</p>
                 <span className="demo-action">⚡ টেস্ট করুন ও অটো-স্ক্যান চালান →</span>
               </button>
 
               <button
                 type="button"
                 className="demo-scenario-card warning"
-                onClick={() => executeDemoScan('message', 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.')}
+                disabled={busy}
+                onClick={() =>
+                  executeDemoScan(
+                    'message',
+                    'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.',
+                  )
+                }
                 title="Tap to automatically analyze this Banglish OTP scam"
               >
                 <div className="demo-card-top">
                   <span className="demo-icon-wrap">💬</span>
-                  <span className="demo-tag warning">BANGLISH OTP</span>
+                  <span className="demo-tag warning">BANGLISH PIN</span>
                 </div>
                 <strong>Banglish PIN Scam</strong>
-                <p className="demo-preview">Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.</p>
+                <p className="demo-preview">
+                  Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.
+                </p>
                 <span className="demo-action">⚡ টেস্ট করুন ও অটো-স্ক্যান চালান →</span>
               </button>
 
               <button
                 type="button"
                 className="demo-scenario-card warning"
-                onClick={() => executeDemoScan('message', 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।')}
+                disabled={busy}
+                onClick={() =>
+                  executeDemoScan(
+                    'message',
+                    'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।',
+                  )
+                }
                 title="Tap to automatically analyze this lottery trap"
               >
                 <div className="demo-card-top">
@@ -949,40 +1078,55 @@ function Scanner({
                   <span className="demo-tag warning">BANGLA LOTTERY</span>
                 </div>
                 <strong>Bangla Lottery Scam</strong>
-                <p className="demo-preview">অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।</p>
+                <p className="demo-preview">
+                  অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।
+                </p>
                 <span className="demo-action">⚡ টেস্ট করুন ও অটো-স্ক্যান চালান →</span>
               </button>
 
               <button
                 type="button"
                 className="demo-scenario-card success"
+                disabled={busy}
                 onClick={() => executeDemoScan('url', 'https://www.bkash.com')}
-                title="Tap to automatically analyze this verified safe domain"
+                title="Analyze a known domain; a low score does not guarantee safety"
               >
                 <div className="demo-card-top">
                   <span className="demo-icon-wrap">✅</span>
-                  <span className="demo-tag success">VERIFIED SAFE</span>
+                  <span className="demo-tag success">OFFICIAL DOMAIN EXAMPLE</span>
                 </div>
-                <strong>Official Safe Site</strong>
+                <strong>Known Domain Example</strong>
                 <p className="demo-preview">https://www.bkash.com</p>
                 <span className="demo-action">⚡ টেস্ট করুন ও অটো-স্ক্যান চালান →</span>
               </button>
             </div>
           </div>
 
-          <div className="assistant-showcase-banner" onClick={onOpenAssistant} role="button" tabIndex={0}>
+          <div className="assistant-showcase-banner">
             <div className="assistant-showcase-left">
               <div className="assistant-showcase-icon">
                 <Bot size={28} />
                 <span className="status-ping-dot" />
               </div>
               <div className="assistant-showcase-info">
-                <span className="showcase-eyebrow">২৪/৭ সাইবার নিরাপত্তা বিশেষজ্ঞ · AI COPILOT</span>
+                <span className="showcase-eyebrow">
+                  সাইবার নিরাপত্তা নির্দেশনা · SAFETY ASSISTANT
+                </span>
                 <h4>অনলাইনে কোনো মেসেজ, কল বা লিঙ্ক নিয়ে সন্দেহ হচ্ছে?</h4>
-                <p>আমাদের সাইবার এআই সহকারী বিকাশ/নগদ পিন স্ক্যাম, ফেসবুক হ্যাক, ব্ল্যাকমেইল বা জিডি করার নিয়মে মুহূর্তেই সঠিক দিকনির্দেশনা দেয়।</p>
+                <p>
+                  পিন বা ওটিপি প্রতারণা, অ্যাকাউন্ট নিরাপত্তা এবং সহায়তার যোগাযোগ নিয়ে সাধারণ
+                  নির্দেশনা পড়ুন। উত্তর ভুল হতে পারে; প্রয়োজন হলে সংশ্লিষ্ট প্রতিষ্ঠানের সহায়তা নিন।
+                </p>
               </div>
             </div>
-            <button type="button" className="btn-showcase-chat" onClick={(e) => { e.stopPropagation(); onOpenAssistant(); }}>
+            <button
+              type="button"
+              className="btn-showcase-chat"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenAssistant();
+              }}
+            >
               <Sparkles size={16} />
               <span>এআই সহকারীর সাথে চ্যাট করুন</span>
               <ArrowRight size={16} />
@@ -990,14 +1134,26 @@ function Scanner({
           </div>
         </section>
         <aside className="scan-side">
-          <div className="card assistant-sidebar-card" onClick={onOpenAssistant} role="button" tabIndex={0}>
+          <div className="card assistant-sidebar-card">
             <div className="assistant-sidebar-top">
-              <span className="bot-sidebar-avatar"><Bot size={24} /></span>
-              <span className="sidebar-live-tag">২৪/৭ এক্টিভ</span>
+              <span className="bot-sidebar-avatar">
+                <Bot size={24} />
+              </span>
+              <span className="sidebar-live-tag">General guidance</span>
             </div>
             <h3>🤖 সাইবার এআই সহকারী</h3>
-            <p>প্রতারণার শিকার হলে বা আইনি পরামর্শের জন্য সরাসরি এআই এক্সপার্টের সাথে কথা বলুন।</p>
-            <button type="button" className="btn-sidebar-ask" onClick={(e) => { e.stopPropagation(); onOpenAssistant(); }}>
+            <p>
+              প্রতারণার সন্দেহ হলে করণীয় সম্পর্কে সাধারণ নির্দেশনা দেখুন। এটি পেশাদার বা আইনি
+              পরামর্শ নয়।
+            </p>
+            <button
+              type="button"
+              className="btn-sidebar-ask"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenAssistant();
+              }}
+            >
               <Sparkles size={14} />
               <span>চ্যাট শুরু করুন</span>
               <ArrowRight size={14} />
@@ -1045,12 +1201,21 @@ function Scanner({
                 ? 'Reading the screenshot may take up to a minute on first use.'
                 : 'Checking available evidence. External services may take a few seconds.'}
             </p>
+            <Button variant="outline" size="sm" onClick={() => requestRef.current?.abort()}>
+              Cancel scan
+            </Button>
           </div>
         </div>
       )}
       {result ? (
         <div id="scan-result-card">
-          <Result result={result} user={user} notify={notify} requireAuth={requireAuth} />
+          <Result
+            result={result}
+            user={user}
+            notify={notify}
+            requireAuth={requireAuth}
+            emailAvailable={Boolean(health?.email)}
+          />
         </div>
       ) : (
         <div className="how-section">
@@ -1100,24 +1265,42 @@ function Result({
   notify,
   requireAuth,
   onSaved,
+  emailAvailable,
 }: {
   result: ScanResult;
   onSaved?: (id: string, saved: boolean) => void;
   user: User | null;
   notify: (s: string) => void;
   requireAuth: () => void;
+  emailAvailable?: boolean;
 }) {
   const [saved, setSaved] = useState(Boolean(r.saved));
   const [reportOpen, setReportOpen] = useState(false);
   const [gdOpen, setGdOpen] = useState(false);
   const [panicOpen, setPanicOpen] = useState(false);
+  const [pending, setPending] = useState<'save' | 'email' | null>(null);
   const resultRef = useRef<HTMLElement>(null);
   useEffect(() => {
     setSaved(Boolean(r.saved));
-    resultRef.current?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
+  }, [r.id, r.saved]);
+  useEffect(() => {
+    resultRef.current?.focus({ preventScroll: true });
+    resultRef.current?.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'instant'
+        : 'smooth',
+      block: 'start',
+    });
   }, [r.id]);
   return (
-    <section ref={resultRef} className="card result-card" aria-live="polite" style={{ scrollMarginTop: 24 }}>
+    <section
+      ref={resultRef}
+      className="card result-card"
+      tabIndex={-1}
+      aria-label={`Scan result: ${r.level}, risk score ${r.score} out of 100`}
+      aria-live="polite"
+      style={{ scrollMarginTop: 24 }}
+    >
       <div className="result-top">
         <div
           className="score-ring"
@@ -1150,23 +1333,34 @@ function Result({
             <ShieldAlert size={16} />
             <span>🇧🇩 সাধারণ মানুষের জন্য সহজ বাংলা পরামর্শ</span>
           </div>
-          <span className={'bangla-risk-tag ' + (r.score >= 50 ? 'tag-crit' : r.score >= 25 ? 'tag-warn' : 'tag-safe')}>
-            {r.score >= 75 ? '🔴 চরম বিপজ্জনক' : r.score >= 50 ? '🟠 উচ্চ ঝুঁকি (স্ক্যাম)' : r.score >= 25 ? '🟡 সতর্ক থাকুন' : '🟢 নিরাপদ (সাধারণ)'}
+          <span
+            className={
+              'bangla-risk-tag ' +
+              (r.score >= 50 ? 'tag-crit' : r.score >= 25 ? 'tag-warn' : 'tag-safe')
+            }
+          >
+            {r.score >= 75
+              ? '🔴 অতি উচ্চ ঝুঁকির সংকেত'
+              : r.score >= 50
+                ? '🟠 উচ্চ ঝুঁকির সংকেত'
+                : r.score >= 25
+                  ? '🟡 সতর্ক থাকুন'
+                  : '🟢 কম ঝুঁকির সংকেত'}
           </span>
         </div>
         <div className="bangla-advisory-body">
           <h4>
             {r.score >= 50
-              ? '⚠️ ভুয়া বা প্রতারণামূলক ফাঁদ ধরা পড়েছে!'
+              ? '⚠️ প্রতারণার একাধিক সতর্ক সংকেত পাওয়া গেছে'
               : r.score >= 25
                 ? '⚡ কিছু সন্দেহজনক বিষয় লক্ষ্য করা গেছে'
                 : '✅ প্রাথমিক পরীক্ষায় বড় কোনো বিপদের লক্ষণ পাওয়া যায়নি'}
           </h4>
           <p>
             {r.evidence.some((e) => e.id === 'credentials')
-              ? 'প্রতারকরা এই মেসেজ বা লিংকের মাধ্যমে আপনার বিকাশ/নগদ/ব্যাংকের গোপন পিন (PIN), ওটিপি (OTP) বা পাসওয়ার্ড হাতিয়ে নেওয়ার চেষ্টা করছে। মনে রাখবেন, কোনো ব্যাংক বা এমএফএস প্রতিষ্ঠান কখনোই আপনার পিন জানতে চায় না।'
+              ? 'এই কনটেন্টে গোপন পিন (PIN), ওটিপি (OTP) বা পাসওয়ার্ড চাওয়ার সংকেত পাওয়া গেছে। অন্য কাউকে এসব তথ্য দেবেন না; প্রতিষ্ঠানের নিজস্ব অ্যাপ বা পরিচিত যোগাযোগ মাধ্যমে যাচাই করুন।'
               : r.evidence.some((e) => e.id.startsWith('brand:'))
-                ? 'আসল ওয়েবসাইটের মতো হুবহু দেখতে নকল ডোমেন বা ওয়েবসাইট বানিয়ে প্রতারণা করা হচ্ছে (যেমন বিকাশ বা ব্যাংকের ভুয়া লিংক)। এটি সম্পূর্ণ বিপজ্জনক ও অননুমোদিত।'
+                ? 'ডোমেনে পরিচিত ব্র্যান্ডের নাম বা কাছাকাছি বানান পাওয়া গেছে। এটি ছদ্মবেশের সংকেত হতে পারে। নিজে অফিশিয়াল ঠিকানা লিখে বা প্রতিষ্ঠানের অ্যাপ দিয়ে যাচাই করুন।'
                 : r.evidence.some((e) => e.id === 'prize')
                   ? 'লটারি বা ফ্রি পুরস্কারের লোভ দেখিয়ে অর্থ বা গোপন পিন হাতিয়ে নেওয়ার সাধারণ প্রতারণার প্যাটার্ন পাওয়া গেছে। ভুয়া পুরস্কারের দাবিতে অর্থ পাঠাবেন না।'
                   : r.score >= 50
@@ -1175,13 +1369,14 @@ function Result({
           </p>
           <div className="bangla-helpline-strip">
             <span>জরুরি হেল্পলাইন:</span>
-            <strong>বিকাশ: ১৬২৪৭</strong> · <strong>নগদ: ১৬১৬৭</strong> · <strong>সাইবার পুলিশ: ৯৯৯ / ০১৩২০-০০০৮৮৮</strong>
+            <strong>বিকাশ: ১৬২৪৭</strong> · <strong>নগদ: ১৬১৬৭</strong> ·{' '}
+            <strong>জরুরি বিপদে: ৯৯৯</strong>
           </div>
         </div>
       </div>
       <div className="result-body">
         <div>
-          <h3>Why SafeLink is warning you</h3>
+          <h3>Evidence found by the scanner</h3>
           {r.evidence.length ? (
             r.evidence.map((e) => (
               <div className="evidence" key={e.id}>
@@ -1238,7 +1433,8 @@ function Result({
           <div className="emergency-freeze-banner-content">
             <strong>🚨 আপনি কি এই লিংকে ভুলবশত পিন বা ওটিপি দিয়ে ফেলেছেন?</strong>
             <p>
-              আর্থিক ক্ষতি এড়াতে ১ সেকেন্ডও দেরি করবেন না। অবিলম্বে হটলাইনে যোগাযোগ করে একাউন্ট সাময়িক ফ্রিজ করুন অথবা সেলফ-লক প্রোটোকল প্রয়োগ করুন।
+              দ্রুত সংশ্লিষ্ট প্রতিষ্ঠানের অফিসিয়াল হটলাইনে যোগাযোগ করুন এবং সন্দেহজনক লেনদেন বন্ধ
+              করার সহায়তা চান। SafeLink নিজে অ্যাকাউন্ট ফ্রিজ করতে পারে না।
             </p>
           </div>
           <button
@@ -1246,7 +1442,7 @@ function Result({
             className="btn-emergency-freeze-trigger"
             onClick={() => setPanicOpen(true)}
           >
-            <Zap size={14} /> 🚨 জরুরি একাউন্ট ফ্রিজ প্রোটোকল
+            <Zap size={14} /> জরুরি করণীয় দেখুন
           </button>
         </div>
       )}
@@ -1263,19 +1459,11 @@ function Result({
             : 'This result has not been saved.'}{' '}
           Score is not a probability.
         </small>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setReportOpen(true)}
-        >
+        <Button variant="outline" size="sm" onClick={() => setReportOpen(true)}>
           <FileText size={15} />
           Export Threat Report
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setGdOpen(true)}
-        >
+        <Button variant="outline" size="sm" onClick={() => setGdOpen(true)}>
           <Scale size={15} />
           ১-ক্লিক পুলিশ জিডি ড্রাফট
         </Button>
@@ -1287,7 +1475,7 @@ function Result({
             onClick={() => setPanicOpen(true)}
           >
             <ShieldAlert size={15} />
-            🚨 জরুরি একাউন্ট ফ্রিজ
+            জরুরি সহায়তা
           </Button>
         )}
         {r.persisted && user ? (
@@ -1295,7 +1483,10 @@ function Result({
             <Button
               variant="outline"
               size="sm"
+              disabled={Boolean(pending)}
               onClick={async () => {
+                if (pending) return;
+                setPending('save');
                 try {
                   await api('/scans/' + r.id, {
                     method: 'PATCH',
@@ -1305,6 +1496,8 @@ function Result({
                   setSaved(!saved);
                 } catch (e) {
                   notify((e as Error).message);
+                } finally {
+                  setPending(null);
                 }
               }}
             >
@@ -1314,18 +1507,37 @@ function Result({
             <Button
               variant="outline"
               size="sm"
+              disabled={Boolean(pending) || !user.verified || !emailAvailable}
+              title={
+                !user.verified
+                  ? 'Verify your email in Settings first'
+                  : !emailAvailable
+                    ? 'Email delivery is not configured'
+                    : 'Send a security alert to your email'
+              }
               onClick={async () => {
+                if (pending) return;
+                setPending('email');
                 try {
                   await post('/alerts', { scanId: r.id });
                   notify('Security alert sent to your email.');
                 } catch (e) {
                   notify((e as Error).message);
+                } finally {
+                  setPending(null);
                 }
               }}
             >
               <Mail size={15} />
               Email alert
             </Button>
+            {(!user.verified || !emailAvailable) && (
+              <small>
+                {!user.verified
+                  ? 'Verify your email in Settings for alerts.'
+                  : 'Email delivery is not configured.'}
+              </small>
+            )}
           </>
         ) : (
           !user && (
@@ -1335,12 +1547,8 @@ function Result({
           )
         )}
       </div>
-      {reportOpen && (
-        <ThreatReportModal result={r} onClose={() => setReportOpen(false)} />
-      )}
-      {gdOpen && (
-        <PoliceGdModal result={r} onClose={() => setGdOpen(false)} />
-      )}
+      {reportOpen && <ThreatReportModal result={r} onClose={() => setReportOpen(false)} />}
+      {gdOpen && <PoliceGdModal result={r} onClose={() => setGdOpen(false)} />}
       {panicOpen && (
         <EmergencyFreezeModal
           onClose={() => setPanicOpen(false)}
@@ -1354,19 +1562,16 @@ function Result({
   );
 }
 
-function ThreatReportModal({
-  result: r,
-  onClose,
-}: {
-  result: ScanResult;
-  onClose: () => void;
-}) {
+function ThreatReportModal({ result: r, onClose }: { result: ScanResult; onClose: () => void }) {
+  const modalRef = useModalFocus<HTMLDivElement>(onClose);
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
         className="modal threat-report-modal"
+        ref={modalRef}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
+        aria-modal="true"
         aria-label="Cyber Threat Assessment Report"
       >
         <div className="report-modal-header no-print">
@@ -1375,11 +1580,7 @@ function ThreatReportModal({
             <span>Cyber Threat Incident & Assessment Report</span>
           </div>
           <div className="report-modal-actions">
-            <Button
-              className="primary"
-              size="sm"
-              onClick={() => window.print()}
-            >
+            <Button className="primary" size="sm" onClick={() => window.print()}>
               <Printer size={16} /> Print / Save as PDF
             </Button>
             <Button variant="outline" size="sm" onClick={onClose}>
@@ -1395,14 +1596,34 @@ function ThreatReportModal({
                 <ShieldCheck size={36} />
               </div>
               <div>
-                <h1>SAFELINK AI CYBER DEFENSE LABS</h1>
-                <p>National Threat Assessment & Incident Verification Registry · Bangladesh</p>
+                <h1>SAFELINK AI</h1>
+                <p>Scan analysis record · submitted content only</p>
               </div>
             </div>
             <div className="report-meta-box">
-              <div><strong>INCIDENT REF:</strong> <code>{r.id.slice(0, 16).toUpperCase()}</code></div>
-              <div><strong>TIMESTAMP:</strong> {new Date(r.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Dhaka', dateStyle: 'medium', timeStyle: 'medium' })} BST</div>
-              <div><strong>THREAT LEVEL:</strong> <span className={'report-pill ' + (r.score >= 50 ? 'pill-crit' : r.score >= 25 ? 'pill-warn' : 'pill-safe')}>{r.level.toUpperCase()}</span></div>
+              <div>
+                <strong>INCIDENT REF:</strong> <code>{r.id.slice(0, 16).toUpperCase()}</code>
+              </div>
+              <div>
+                <strong>TIMESTAMP:</strong>{' '}
+                {new Date(r.createdAt).toLocaleString('en-US', {
+                  timeZone: 'Asia/Dhaka',
+                  dateStyle: 'medium',
+                  timeStyle: 'medium',
+                })}{' '}
+                BST
+              </div>
+              <div>
+                <strong>THREAT LEVEL:</strong>{' '}
+                <span
+                  className={
+                    'report-pill ' +
+                    (r.score >= 50 ? 'pill-crit' : r.score >= 25 ? 'pill-warn' : 'pill-safe')
+                  }
+                >
+                  {r.level.toUpperCase()}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -1415,11 +1636,18 @@ function ThreatReportModal({
                 <tbody>
                   <tr>
                     <td>Vector Type</td>
-                    <td><strong>{r.kind.toUpperCase()}</strong></td>
+                    <td>
+                      <strong>{r.kind.toUpperCase()}</strong>
+                    </td>
                   </tr>
                   <tr>
                     <td>Target / Preview</td>
-                    <td className="break-all"><code>{r.preview || (r.urls && r.urls[0] ? r.urls[0] : 'Content obscured for privacy')}</code></td>
+                    <td className="break-all">
+                      <code>
+                        {r.preview ||
+                          (r.urls && r.urls[0] ? r.urls[0] : 'Content obscured for privacy')}
+                      </code>
+                    </td>
                   </tr>
                   {r.urls && r.urls.length > 0 && (
                     <tr>
@@ -1430,7 +1658,9 @@ function ThreatReportModal({
                   {r.phones && r.phones.length > 0 && (
                     <tr>
                       <td>Identified MFS/Phone</td>
-                      <td><strong>{r.phones.join(', ')}</strong></td>
+                      <td>
+                        <strong>{r.phones.join(', ')}</strong>
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -1440,20 +1670,26 @@ function ThreatReportModal({
             <div className="report-box">
               <h3>Threat Index & Scoring Matrix</h3>
               <div className="report-score-panel">
-                <div className="score-big" style={{ color: r.score >= 50 ? '#c53030' : r.score >= 25 ? '#dd6b20' : '#2f855a' }}>
-                  {r.score}<span>/100</span>
+                <div
+                  className="score-big"
+                  style={{
+                    color: r.score >= 50 ? '#c53030' : r.score >= 25 ? '#dd6b20' : '#2f855a',
+                  }}
+                >
+                  {r.score}
+                  <span>/100</span>
                 </div>
                 <div>
                   <h4>{r.level}</h4>
                   <p>{r.threatType || 'No strong threat markers'}</p>
-                  <small>Calculated via 4-Layer Heuristic, Community & Semantic Engine</small>
+                  <small>Rule-based indicator score; not a probability or certification</small>
                 </div>
               </div>
             </div>
           </div>
 
           <div className="report-box report-evidence-box">
-            <h3>Forensic Evidence & Indicators of Compromise (IoC)</h3>
+            <h3>Matched warning indicators</h3>
             {r.evidence && r.evidence.length > 0 ? (
               <table className="evidence-table">
                 <thead>
@@ -1467,43 +1703,77 @@ function ThreatReportModal({
                 <tbody>
                   {r.evidence.map((e) => (
                     <tr key={e.id}>
-                      <td><code>{e.id}</code></td>
-                      <td><span className="source-tag">{e.source}</span></td>
-                      <td><strong>{e.title}:</strong> {e.detail}</td>
+                      <td>
+                        <code>{e.id}</code>
+                      </td>
+                      <td>
+                        <span className="source-tag">{e.source}</span>
+                      </td>
+                      <td>
+                        <strong>{e.title}:</strong> {e.detail}
+                      </td>
                       <td>+{e.weight} pts</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             ) : (
-              <p className="no-threat-note">No malicious indicators or spoofing artifacts identified by rule heuristics.</p>
+              <p className="no-threat-note">
+                No strong indicators were found by completed checks. This does not establish safety.
+              </p>
             )}
           </div>
 
           {r.aiExplanation && (
             <div className="report-box report-ai-box">
-              <h3>Mistral AI Semantic Fraud Interpretation</h3>
+              <h3>Optional AI interpretation</h3>
               <p>{r.aiExplanation}</p>
             </div>
           )}
 
+          <div className="report-box">
+            <h3>Checks and coverage</h3>
+            {r.checks.map((check, index) => (
+              <p key={check.name + index}>
+                <strong>
+                  {check.name} · {check.status}:
+                </strong>{' '}
+                {check.detail}
+              </p>
+            ))}
+            <small>
+              Unavailable or skipped checks provide no conclusion. A low score does not prove
+              safety.
+            </small>
+          </div>
+
           <div className="report-box report-advisory-box">
             <h3>Incident Response & Actionable Advisory</h3>
-            <p><strong>Primary Recommendation:</strong> {r.recommendation}</p>
+            <p>
+              <strong>Primary Recommendation:</strong> {r.recommendation}
+            </p>
             <div className="emergency-contacts">
-              <div>📞 <strong>bKash Fraud Helpline:</strong> 16247</div>
-              <div>📞 <strong>Nagad Helpline:</strong> 16167</div>
-              <div>🚨 <strong>Bangladesh Police Cyber Support:</strong> 01320-000888 / 999</div>
+              <div>
+                📞 <strong>bKash Fraud Helpline:</strong> 16247
+              </div>
+              <div>
+                📞 <strong>Nagad Helpline:</strong> 16167
+              </div>
+              <div>
+                🚨 <strong>Immediate danger:</strong> 999
+              </div>
             </div>
           </div>
 
           <div className="report-footer">
             <div className="report-seal">
               <ShieldCheck size={18} />
-              <span>OFFICIAL SAFELINK AI FORENSIC AUDIT RECORD</span>
+              <span>SAFELINK SCAN RECORD</span>
             </div>
             <div className="report-disclaimer">
-              Generated by SafeLink AI Cyber Platform. Valid for digital threat auditing, institutional fraud escalation, and MFS consumer safety protection in Bangladesh.
+              Generated from the submitted content and checks listed above. This report is general
+              guidance, not a forensic examination, legal finding or proof of fraud. Review original
+              evidence independently.
             </div>
           </div>
         </div>
@@ -1513,211 +1783,139 @@ function ThreatReportModal({
 }
 
 function AiPipelineFlow({ result: r }: { result: ScanResult }) {
-  const hasHeuristic = r.evidence.some((e) =>
-    e.id === 'credentials' ||
-    e.id === 'prize' ||
-    e.id === 'urgency' ||
-    e.id.includes('banglish') ||
-    e.id.includes('keyword') ||
-    e.id.includes('lottery')
-  );
-  const hasTyposquatting = r.evidence.some((e) =>
-    e.id.startsWith('brand:') ||
-    e.id === 'lookalike' ||
-    e.id === 'untrusted_host' ||
-    e.id === 'ip_host' ||
-    e.id === 'userinfo' ||
-    e.id === 'scheme'
-  );
-
-  const stages = [
-    {
-      num: '01',
-      layer: 'Layer 1: Heuristic Engine',
-      title: 'Bangla & Banglish Keyword Scorer',
-      latency: '12ms',
-      status: hasHeuristic ? 'FLAGGED' : 'PASSED',
-      statusClass: hasHeuristic ? 'status-danger' : 'status-safe',
-      icon: Cpu,
-      detail: hasHeuristic
-        ? 'জরুরি পিন/ওটিপি তলব, ভুয়া লটারি বা একাউন্ট ব্লকের বাংলা/বাংলিশ প্যাটার্ন সক্রিয় সনাক্ত হয়েছে।'
-        : 'কোনো সন্দেহজনক বাংলা বা বাংলিশ ম্যানিপুলেশন কি-ওয়ার্ড পাওয়া যায়নি।',
-    },
-    {
-      num: '02',
-      layer: 'Layer 2: Typosquatting & Levenshtein',
-      title: 'Domain Distance & Homoglyph Inspector',
-      latency: '18ms',
-      status: hasTyposquatting ? 'FLAGGED' : 'VERIFIED',
-      statusClass: hasTyposquatting ? 'status-danger' : 'status-safe',
-      icon: Network,
-      detail: hasTyposquatting
-        ? 'নকল বা অননুমোদিত ডোমেন, ব্র্যান্ড নেম ইনজেকশন বা ক্ষতিকর সাইরিলিক লুক-অ্যালাইক ক্যারেক্টার ধরা পড়েছে।'
-        : 'ডোমেন স্ট্রাকচার ভেরিফাইড প্রাতিষ্ঠানিক ডেটাবেজের সাথে সামঞ্জস্যপূর্ণ অথবা নিরাপদ।',
-    },
-    {
-      num: '03',
-      layer: 'Layer 3: Semantic NLP Classifier',
-      title: 'Contextual Fraud Sentiment Model',
-      latency: '45ms',
-      status: r.score >= 50 ? 'HIGH RISK' : r.score >= 25 ? 'SUSPICIOUS' : 'LOW RISK',
-      statusClass: r.score >= 50 ? 'status-danger' : r.score >= 25 ? 'status-warn' : 'status-safe',
-      icon: Activity,
-      detail: r.aiExplanation
-        ? r.aiExplanation
-        : r.score >= 50
-          ? 'আর্থিক সোস্যাল ইঞ্জিনিয়ারিং ও ইউজারকে বিভ্রান্ত করার উচ্চ সম্ভাব্য প্রতারণা কৌশল সক্রিয়।'
-          : 'স্বাভাবিক ও নিরাপদ যোগাযোগের কনটেক্সট পাওয়া গেছে।',
-    },
-    {
-      num: '04',
-      layer: 'Layer 4: Threat Intelligence',
-      title: 'Reputation & Blocklist Correlator',
-      latency: '10ms',
-      status: r.score >= 50 ? 'CORRELATED' : 'SYNCHRONIZED',
-      statusClass: r.score >= 50 ? 'status-danger' : 'status-safe',
-      icon: ShieldCheck,
-      detail: 'জাতীয় এমএফএস থ্রেট রেজিস্ট্রি, কমিউনিটি রিপোর্ট এবং সিকিউরিটি ব্লক-লিস্টের সাথে ক্রস-রেফারেন্স সম্পন্ন।',
-    },
-  ];
-
   return (
     <div className="ai-pipeline-card">
       <div className="pipeline-header">
         <div className="pipeline-title-group">
-          <Zap size={18} className="pipeline-zap-icon" />
+          <Activity size={18} />
           <div>
-            <h4>4-Stage Multi-Layer AI Pipeline Analysis</h4>
-            <p>রিয়েল-টাইম চার স্তরের এআই সিকিউরিটি ও হেউরিস্টিক অডিট ফ্লো</p>
+            <h4>Analysis trace</h4>
+            <p>এই ফলাফলে কোন পরীক্ষা সম্পন্ন হয়েছে, কোনটি হয়নি, তা দেখুন।</p>
           </div>
         </div>
-        <div className="pipeline-speed-badge">
-          <Clock size={13} />
-          <span>Total Edge Latency: <strong>85ms</strong></span>
-        </div>
+        <span className="subtle-tag">
+          {r.checks.filter((c) => c.status === 'complete').length} / {r.checks.length} checks
+          complete
+        </span>
       </div>
       <div className="pipeline-grid">
-        {stages.map((s, idx) => {
-          const IconComp = s.icon;
-          return (
-            <div key={idx} className={`pipeline-step-box ${s.statusClass}`}>
-              <div className="pipeline-step-top">
-                <span className="step-num">{s.num}</span>
-                <span className="step-layer">{s.layer}</span>
-                <span className={`step-badge ${s.statusClass}`}>{s.status}</span>
-              </div>
-              <div className="pipeline-step-name">
-                <IconComp size={15} />
-                <strong>{s.title}</strong>
-              </div>
-              <p className="pipeline-step-detail">{s.detail}</p>
-              <div className="pipeline-step-foot">
-                <span className="latency-chip">⏱️ {s.latency}</span>
-                <span className="step-check-tag">✓ Engine Check</span>
-              </div>
+        {r.checks.map((check, index) => (
+          <div
+            key={check.name + index}
+            className={
+              'pipeline-step-box ' + (check.status === 'complete' ? 'status-safe' : 'status-warn')
+            }
+          >
+            <div className="pipeline-step-top">
+              <span className="step-num">{String(index + 1).padStart(2, '0')}</span>
+              <span className="step-badge">{check.status}</span>
             </div>
-          );
-        })}
+            <div className="pipeline-step-name">
+              {check.status === 'complete' ? <CheckCircle2 size={15} /> : <Clock size={15} />}
+              <strong>{check.name}</strong>
+            </div>
+            <p className="pipeline-step-detail">{check.detail}</p>
+          </div>
+        ))}
       </div>
+      <p className="small-print">
+        A completed check describes the work performed. It does not certify safety. AI
+        interpretation appears only when it was returned by a configured provider.
+      </p>
     </div>
   );
 }
 
-function PoliceGdModal({
-  result: r,
-  onClose,
-}: {
-  result: ScanResult;
-  onClose: () => void;
-}) {
+function PoliceGdModal({ result: r, onClose }: { result: ScanResult; onClose: () => void }) {
+  const modalRef = useModalFocus<HTMLDivElement>(onClose);
   const [copied, setCopied] = useState(false);
-  const incidentId = 'SL-GD-' + r.id.slice(0, 8).toUpperCase();
-  const today = new Date().toLocaleDateString('bn-BD', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-
-  const gdText = `বরাবর,
-অফিসার ইনচার্জ / সাইবার ক্রাইম ইনভেস্টিগেশন ইউনিট
-[নিকটস্থ থানা / সিআইডি সাইবার পুলিশ সেন্টার, ঢাকা]
-
-বিষয়: অনলাইন ফিশিং / আর্থিক প্রতারণার ফাঁদ সংক্রান্ত সাধারণ ডায়েরি (GD) ও আইনগত তদন্তের আবেদন।
-
-মহোদয়,
-বিনীত নিবেদন এই যে, আমি নিম্নস্বাক্ষরকারী একজন সচেতন নাগরিক। সম্প্রতি আমি একটি পরিকল্পিত ডিজিটাল আর্থিক প্রতারণার শিকার হতে যাচ্ছিলাম / সাইবার সিকিউরিটি থ্রেট শনাক্ত করেছি। 'SafeLink AI' এর সাইবার ফরেনসিক ইঞ্জিন দ্বারা উক্ত সাইবার অপরাধমূলক প্রচেষ্টাটি শনাক্ত ও বিশ্লেষণ করা হয়েছে।
-
-ঘটনা ও ডিজিটাল আলামতের বিবরণ:
-১. ইনসিডেন্ট ট্র্যাকিং আইডি: ${incidentId}
-২. ঝুঁকি মাত্রা (Risk Score): ${r.score}/100 (${r.level.toUpperCase()} - ${r.threatType})
-৩. সন্দেহভাজন ফিশিং লিংক / বার্তা: ${r.preview || (r.urls && r.urls[0] ? r.urls[0] : 'গোপনীয়তা রক্ষার্থে সুরক্ষিত')}
-৪. সময় ও তারিখ: ${new Date(r.createdAt).toLocaleString('bn-BD')}
-৫. এআই ও ফরেনসিক প্রমাণের তালিকা:
-${r.evidence.length ? r.evidence.map((e, idx) => `   (${idx + 1}) ${e.title}: ${e.detail}`).join('\n') : '   - সন্দেহজনক আর্থিক ফিশিং প্যাটার্ন'}
-
-উক্ত মেসেজ/লিংকের মাধ্যমে বিকাশ, নগদ বা ব্যাংক গ্রাহকদের বিভ্রান্ত করে গোপন পিন (PIN), ওটিপি (OTP) বা অর্থ আত্মসাতের চক্রান্ত করা হচ্ছিল। 
-
-অতএব, মহোদয়ের নিকট বিনীত প্রার্থনা, ভবিষ্যতের আইনি নিরাপত্তা ও প্রতারক চক্রের বিরুদ্ধে সাইবার নিরাপত্তা আইন এবং বিটিআরসি নির্দেশিকা অনুযায়ী ব্যবস্থা গ্রহণের লক্ষ্যে উক্ত বিবরণটি সাধারণ ডায়েরি (GD) হিসেবে অন্তর্ভুক্ত করতে মর্জি হয়।
-
-বিনীত নিবেদনকারী,
-নাম: ___________________________
-মোবাইল নম্বর: ___________________
-জাতীয় পরিচয়পত্র (NID) নম্বর: ____________________
-ঠিকানা: ________________________
-তারিখ: ${today}
-
-সংযুক্তি:
-১. SafeLink AI সাইবার থ্রেট ফরেনসিক রিপোর্ট (${incidentId})
-২. সন্দেহভাজন মেসেজ/লিংকের স্ক্রিনশট ও প্রমাণাদি`;
-
-  const copyDraft = async () => {
+  const [copyError, setCopyError] = useState('');
+  const gdText = [
+    'বরাবর,',
+    'অফিসার ইনচার্জ / সংশ্লিষ্ট অভিযোগ গ্রহণকারী কর্মকর্তা',
+    '[থানা বা কর্তৃপক্ষের নাম ও ঠিকানা]',
+    '',
+    'বিষয়: সন্দেহজনক অনলাইন ঘটনা সম্পর্কে অভিযোগ ও সহায়তার অনুরোধ।',
+    '',
+    'মহোদয়,',
+    'আমার সঙ্গে [নিজের সত্য ঘটনা, তারিখ, সময় ও যোগাযোগের বিবরণ লিখুন] ঘটেছে।',
+    'ক্ষতি বা লেনদেনের তথ্য: [প্রযোজ্য হলে নিজের তথ্য লিখুন; না হলে উল্লেখ করুন]।',
+    '',
+    'সহায়ক স্ক্যানের তথ্য:',
+    'স্ক্যান রেফারেন্স: ' + r.id,
+    'স্ক্যানের সময়: ' + new Date(r.createdAt).toLocaleString('bn-BD', { timeZone: 'Asia/Dhaka' }),
+    'ইনপুটের সংক্ষিপ্ত বিবরণ: ' + r.preview,
+    'ঝুঁকির সংকেতের স্কোর: ' + r.score + '/100 (' + r.level + ')',
+    'মিল পাওয়া সতর্ক সংকেত:',
+    ...r.evidence.map((e, i) => '(' + (i + 1) + ') ' + e.title + ': ' + e.detail),
+    ...(r.evidence.length ? [] : ['সম্পন্ন পরীক্ষায় জোরালো সতর্ক সংকেত পাওয়া যায়নি।']),
+    '',
+    'SafeLink-এর স্কোর সম্ভাবনা, অপরাধের প্রমাণ বা ফরেনসিক সিদ্ধান্ত নয়। মূল মেসেজ, সময়, নম্বর ও লেনদেনের রসিদ আলাদাভাবে যাচাই করতে হবে।',
+    '',
+    'ঘটনা যাচাই করে প্রযোজ্য পদ্ধতি অনুযায়ী সহায়তা ও করণীয় জানানোর অনুরোধ করছি।',
+    '',
+    'আবেদনকারীর নাম: ___________________',
+    'যোগাযোগ: ___________________',
+    'ঠিকানা: ___________________',
+    'তারিখ ও স্বাক্ষর: ___________________',
+    '',
+    'সংযুক্তি: [নিজের কাছে থাকা মূল স্ক্রিনশট, রসিদ বা অন্য আলামতের তালিকা লিখুন]।',
+  ].join('\n');
+  async function copyDraft() {
+    setCopyError('');
     try {
       await navigator.clipboard.writeText(gdText);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
     } catch {
-      // fallback
+      setCopyError('কপি করা যায়নি। নিচের ড্রাফট থেকে লেখা নির্বাচন করে ম্যানুয়ালি কপি করুন।');
     }
-  };
-
+  }
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
         className="modal police-gd-modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="Police GD and Cyber Complaint Draft"
+        aria-modal="true"
+        aria-label="Complaint draft for review"
       >
         <div className="report-modal-header no-print">
           <div className="report-modal-title">
             <Scale size={20} />
-            <span>১-ক্লিক পুলিশ জিডি ও সাইবার অভিযোগপত্র ড্রাফট</span>
+            <span>পর্যালোচনার জন্য অভিযোগের ড্রাফট</span>
           </div>
           <div className="report-modal-actions">
-            <Button className="primary" size="sm" onClick={copyDraft}>
+            <Button size="sm" onClick={copyDraft}>
               {copied ? <Check size={16} /> : <Copy size={16} />}
-              {copied ? 'কপি সম্পন্ন!' : 'ড্রাফট কপি করুন'}
+              {copied ? 'কপি হয়েছে' : 'ড্রাফট কপি করুন'}
             </Button>
             <Button variant="outline" size="sm" onClick={() => window.print()}>
-              <Printer size={16} /> প্রিন্ট / সেভ PDF
+              <Printer size={16} />
+              প্রিন্ট / PDF
             </Button>
             <Button variant="outline" size="sm" onClick={onClose}>
-              <X size={16} /> বন্ধ করুন
+              <X size={16} />
+              বন্ধ করুন
             </Button>
           </div>
         </div>
-
+        {copyError && (
+          <p className="error no-print" role="alert">
+            {copyError}
+          </p>
+        )}
         <div className="gd-draft-sheet" id="printable-police-gd">
           <div className="gd-notice-banner">
             <Scale size={18} />
             <div>
-              <strong>আইনি সহায়ক ড্রাফট (Legal Assistance Template)</strong>
+              <strong>নিজের ঘটনা যোগ করে যাচাই করুন</strong>
               <p>
-                সাইবার অপরাধের শিকার হলে বা ভুয়া লিংক পেলে এই ড্রাফটটি কপি করে নিকটস্থ থানা, সিআইডি সাইবার পুলিশ (০১৩২০-০০০৮৮৮) বা বিটিআরসি (১০০) হটলাইনে সরাসরি জমা দিতে পারেন।
+                এটি সাধারণ লেখার খসড়া। কোথায় এবং কীভাবে অভিযোগ করবেন, তা সংশ্লিষ্ট কর্তৃপক্ষের সঙ্গে
+                যাচাই করুন। SafeLink অভিযোগ জমা দেয় না এবং আইনগত সিদ্ধান্ত দেয় না।
               </p>
             </div>
           </div>
-
           <pre className="gd-text-preview">{gdText}</pre>
         </div>
       </div>
@@ -1732,139 +1930,129 @@ function EmergencyFreezeModal({
   onClose: () => void;
   onOpenGd?: () => void;
 }) {
-  const [copiedScript, setCopiedScript] = useState(false);
-  const [copiedNumber, setCopiedNumber] = useState<string | null>(null);
-
-  const emergencyContacts = [
-    { name: 'bKash Limited (বিকাশ)', hotline: '16247', tag: 'MFS Hotdesk', color: '#d12053' },
-    { name: 'Nagad (ডাক বিভাগীয় নগদ)', hotline: '16167', tag: 'Govt MFS', color: '#f26522' },
-    { name: 'Rocket (ডাচ-বাংলা ব্যাংক)', hotline: '16216', tag: 'Bank MFS', color: '#8c2d8c' },
-    { name: 'Upay (ইউসিবি উপায়)', hotline: '16268', tag: 'Fintech', color: '#005696' },
-    { name: 'জাতীয় জরুরি সেবা (পুলিশ)', hotline: '999', tag: 'Police Toll-Free', color: '#d32f2f' },
-    { name: 'বিটিআরসি সাইবার কমপ্লেন', hotline: '100', tag: 'Telecom Fraud', color: '#0288d1' },
+  const modalRef = useModalFocus<HTMLDivElement>(onClose);
+  const [copied, setCopied] = useState('');
+  const [copyError, setCopyError] = useState('');
+  const contacts = [
+    { name: 'bKash', hotline: '16247', tag: 'MFS support', color: '#b91c50' },
+    { name: 'Nagad', hotline: '16167', tag: 'MFS support', color: '#c2410c' },
+    { name: 'Rocket / DBBL', hotline: '16216', tag: 'Bank support', color: '#7e227e' },
+    { name: 'জাতীয় জরুরি সেবা', hotline: '999', tag: 'Immediate danger', color: '#b91c1c' },
   ];
-
-  const agentScript =
-    'আমার নাম [আপনার নাম], বিকাশ/নগদ/অ্যাকাউন্ট নম্বর [আপনার নম্বর]। একটি ফিশিং প্রতারক চক্র আমাকে বিভ্রান্ত করে গোপন ওটিপি বা পিন সংগ্রহ করেছে। আমার অ্যাকাউন্ট থেকে কোনো অবৈধ লেনদেন বন্ধ করতে অনতিবিলম্বে সকল আউটগোয়িং লেনদেন সাময়িকভাবে স্থগিত (Freeze) করুন এবং সন্দেহজনক ট্রানজেকশন হোল্ড করুন।';
-
-  const copyScript = async () => {
+  const script =
+    'আমার নাম [আপনার নাম]। আমার অ্যাকাউন্টে [নিজের ঘটনার বিবরণ] ঘটেছে এবং অননুমোদিত লেনদেনের আশঙ্কা করছি। অনুগ্রহ করে পরিচয় যাচাই করে অ্যাকাউন্ট সুরক্ষিত করা এবং সন্দেহজনক লেনদেন বন্ধ করার করণীয় জানান। অভিযোগের রেফারেন্স নম্বর দিন।';
+  async function copy(value: string) {
+    setCopyError('');
     try {
-      await navigator.clipboard.writeText(agentScript);
-      setCopiedScript(true);
-      setTimeout(() => setCopiedScript(false), 2500);
-    } catch {}
-  };
-
-  const copyNumber = async (num: string) => {
-    try {
-      await navigator.clipboard.writeText(num);
-      setCopiedNumber(num);
-      setTimeout(() => setCopiedNumber(null), 2500);
-    } catch {}
-  };
-
+      await navigator.clipboard.writeText(value);
+      setCopied(value);
+    } catch {
+      setCopyError('কপি করা যায়নি। নম্বর বা স্ক্রিপ্ট নির্বাচন করে ম্যানুয়ালি কপি করুন।');
+    }
+  }
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
+        ref={modalRef}
         className="modal emergency-freeze-modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="Emergency Fraud Account Freeze Protocol"
+        aria-modal="true"
+        aria-label="Emergency fraud response guidance"
       >
         <div className="report-modal-header emergency-modal-top">
           <div className="report-modal-title emergency-title">
-            <ShieldAlert size={22} className="panic-icon-spin" />
+            <ShieldAlert size={22} />
             <div>
-              <strong>🚨 জরুরি একাউন্ট ফ্রিজ ও সেলফ-লক প্রোটোকল</strong>
-              <small>Emergency Fraud Account Lock & Protocol</small>
+              <strong>প্রতারণার পর জরুরি করণীয়</strong>
+              <small>SafeLink cannot freeze accounts or reverse transactions.</small>
             </div>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
         </div>
-
         <div className="emergency-modal-body">
+          {copyError && (
+            <p className="error" role="alert">
+              {copyError}
+            </p>
+          )}
           <div className="emergency-alert-callout">
             <AlertTriangle size={24} />
             <div>
-              <strong>১ সেকেন্ডও দেরি করবেন না!</strong>
+              <strong>দ্রুত সংশ্লিষ্ট প্রতিষ্ঠানের সহায়তা নিন</strong>
               <p>
-                প্রতারকের সাথে কোনো গোপন পিন বা ওটিপি শেয়ার করে থাকলে প্রতারক টাকা ট্রান্সফার করার আগেই নিচের পদক্ষেপগুলো নিন।
+                পিন বা ওটিপি দিয়ে থাকলে আর কোনো তথ্য দেবেন না। পরিচিত অফিসিয়াল অ্যাপ বা নম্বর দিয়ে
+                প্রতিষ্ঠানের সঙ্গে যোগাযোগ করুন। তাৎক্ষণিক বিপদে ৯৯৯-এ কল করুন।
               </p>
             </div>
           </div>
-
           <div className="emergency-section">
-            <h4>ধাপ ১: সরাসরি অফিশিয়াল হটলাইনে ডায়াল করুন (1-Click Dial / Copy)</h4>
+            <h4>১. প্রতিষ্ঠানের হটলাইনে যোগাযোগ করুন</h4>
             <div className="emergency-grid">
-              {emergencyContacts.map((c) => (
-                <div key={c.hotline} className="emergency-contact-card" style={{ borderColor: `${c.color}40` }}>
+              {contacts.map((c) => (
+                <div className="emergency-contact-card" key={c.hotline}>
                   <div className="contact-info">
                     <strong>{c.name}</strong>
-                    <span className="contact-tag" style={{ color: c.color, backgroundColor: `${c.color}15` }}>
-                      {c.tag}
-                    </span>
+                    <span className="contact-tag">{c.tag}</span>
                   </div>
                   <div className="contact-actions">
-                    <a href={`tel:${c.hotline}`} className="btn-call" style={{ backgroundColor: c.color }}>
-                      <PhoneCall size={14} /> কল {c.hotline}
+                    <a
+                      href={'tel:' + c.hotline}
+                      className="btn-call"
+                      style={{ backgroundColor: c.color }}
+                    >
+                      <PhoneCall size={14} />
+                      {c.hotline}
                     </a>
                     <button
                       type="button"
                       className="btn-copy-num"
-                      onClick={() => copyNumber(c.hotline)}
-                      title="নম্বর কপি করুন"
+                      aria-label={'Copy ' + c.name + ' number'}
+                      onClick={() => copy(c.hotline)}
                     >
-                      {copiedNumber === c.hotline ? <Check size={14} color="#19876b" /> : <Copy size={14} />}
+                      {copied === c.hotline ? <Check size={14} /> : <Copy size={14} />}
                     </button>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-
           <div className="emergency-section self-lock-box">
-            <div className="self-lock-header">
-              <Zap size={18} />
-              <strong>ধাপ ২: তাত্ক্ষণিক সেলফ-লক কৌশল (Instant Self-Lock Hack)</strong>
-            </div>
+            <h4>২. অফিসিয়াল অ্যাপ দিয়ে নিরাপত্তা পরীক্ষা করুন</h4>
             <p>
-              কাস্টমার কেয়ারের লাইনে সিরিয়াল বা ব্যস্ত থাকলে বিকাশ বা নগদ অ্যাপে ঢুকে <strong>ইচ্ছাকৃতভাবে পর পর ৩ বার ভুল পিন (PIN) দিন</strong>।
+              প্রতিষ্ঠান যেভাবে বলে সেভাবে পিন বা পাসওয়ার্ড পরিবর্তন করুন, অন্য ডিভাইসের সেশন বন্ধ
+              করুন এবং দুই ধাপের যাচাই চালু করুন, যদি এসব সুবিধা থাকে।
             </p>
-            <div className="self-lock-tip">
-              ⚡ ফলাফল: অ্যাপের সিকিউরিটি ইঞ্জিন তাৎক্ষণিকভাবে অ্যাকাউন্ট সাময়িক স্থগিত (Lock) করে দেবে, ফলে প্রতারক অন্য প্রান্তে লগইন থাকা সত্ত্বেও কোনো ক্যাশআউট বা সেন্ড মানি করতে পারবে না!
-            </div>
+            <p>
+              ইচ্ছাকৃত ভুল পিন দিয়ে অ্যাকাউন্ট সুরক্ষিত হয়েছে ধরে নেবেন না। প্রতিষ্ঠান যে নির্দেশনা
+              দেয় তা মেনে অ্যাকাউন্ট বা লেনদেন স্থগিত হওয়ার বিষয়টি নিশ্চিত করুন।
+            </p>
           </div>
-
           <div className="emergency-section">
             <div className="agent-script-header">
-              <h4>ধাপ ৩: কাস্টমার কেয়ার এজেন্টের সাথে যা বলবেন (Call Script)</h4>
-              <button type="button" className="btn-copy-script" onClick={copyScript}>
-                {copiedScript ? <Check size={14} /> : <Copy size={14} />}
-                {copiedScript ? 'কপি হয়েছে!' : 'স্ক্রিপ্ট কপি করুন'}
+              <h4>৩. কাস্টমার কেয়ারে নিজের ঘটনা জানান</h4>
+              <button type="button" className="btn-copy-script" onClick={() => copy(script)}>
+                <Copy size={14} />
+                {copied === script ? 'কপি হয়েছে' : 'স্ক্রিপ্ট কপি করুন'}
               </button>
             </div>
-            <div className="agent-script-content">
-              {agentScript}
-            </div>
+            <div className="agent-script-content">{script}</div>
           </div>
-
-          {onOpenGd && (
-            <div className="emergency-section police-gd-trigger">
-              <h4>ধাপ ৪: আইনি সহায়তা ও সাধারণ ডায়েরি (Police GD)</h4>
-              <p>ভবিষ্যতের আইনি সুরক্ষা ও টাকা উদ্ধারের আবেদন হিসেবে থানায় জিডি করা বাধ্যতামূলক।</p>
-              <Button
-                className="primary w-full"
-                onClick={() => {
-                  onClose();
-                  onOpenGd();
-                }}
-              >
-                <Scale size={16} /> ১-ক্লিক পুলিশ জিডি ও সাইবার অভিযোগ ড্রাফট তৈরি করুন
+          <div className="emergency-section">
+            <h4>৪. মূল আলামত সংরক্ষণ করুন</h4>
+            <p>
+              মেসেজ, নম্বর, সময় ও লেনদেনের রসিদ রাখুন। প্রয়োজন হলে অভিযোগ করার পদ্ধতি সংশ্লিষ্ট
+              কর্তৃপক্ষের কাছে জানুন। টাকা ফেরত পাওয়া নিশ্চিত নয়।
+            </p>
+            {onOpenGd && (
+              <Button onClick={onOpenGd}>
+                <Scale size={16} />
+                অভিযোগের ড্রাফট দেখুন
               </Button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -1872,29 +2060,36 @@ function EmergencyFreezeModal({
 }
 
 function CyberAssistantModal({ onClose }: { onClose: () => void }) {
-  const [messages, setMessages] = useState<Array<{
-    id: string;
-    role: 'user' | 'assistant';
-    text: string;
-    time: string;
-    suggestions?: string[];
-    hotlines?: Array<{ name: string; number: string; tag: string }>;
-  }>>([
+  const modalRef = useModalFocus<HTMLDivElement>(onClose);
+  const requestRef = useRef<AbortController | null>(null);
+  const [external, setExternal] = useState(false);
+  const [messages, setMessages] = useState<
+    Array<{
+      id: string;
+      role: 'user' | 'assistant';
+      text: string;
+      time: string;
+      suggestions?: string[];
+      hotlines?: Array<{ name: string; number: string; tag: string }>;
+      source?: 'local' | 'ai' | 'error';
+      externalUsed?: boolean;
+    }>
+  >([
     {
       id: 'welcome',
       role: 'assistant',
-      text: '👋 **নমস্কার! আমি SafeLink সাইবার এআই সহকারী (Cyber Copilot)।**\n\nআমি আপনাকে অনলাইন সাইবার নিরাপত্তা, ফিশিং ও ওটিপি প্রতারণা প্রতিরোধ, ফেসবুক/হোয়াটসঅ্যাপ একাউন্ট উদ্ধার এবং পুলিশি জিডি সংক্রান্ত পরামর্শ দিতে প্রস্তুত।\n\nনিচের যেকোনো প্রশ্নে ট্যাপ করতে পারেন অথবা আপনার সমস্যা লিখে পাঠান:',
+      text: '**SafeLink নিরাপত্তা সহকারী**\n\nসাধারণ প্রশ্নের জন্য আগে থেকে লেখা নিরাপত্তা নির্দেশনা দেখাতে পারি। External AI বেছে নিলে আপনার প্রশ্ন ও সাম্প্রতিক কথোপকথন configured provider-এ পাঠানো হবে।\n\nপিন, ওটিপি, পাসওয়ার্ড বা ব্যক্তিগত তথ্য লিখবেন না। উত্তর ভুল হতে পারে; প্রয়োজন হলে সংশ্লিষ্ট প্রতিষ্ঠান বা পেশাদারের সাহায্য নিন।',
+      source: 'local',
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       suggestions: [
         'বিকাশ/নগদ পিন কেউ চাইলে কি করব?',
         'আমার একাউন্ট হ্যাক হলে দ্রুত কি করব?',
         'সাইবার ক্রাইম জিডি করার নিয়ম কি?',
-        'টাকা খোয়া গেলে তাৎক্ষণিক উদ্ধারের উপায় কি?',
+        'টাকা খোয়া গেলে দ্রুত কী করব?',
       ],
       hotlines: [
-        { name: 'জাতীয় জরুরি সেবা', number: '999', tag: 'পুলিশ' },
+        { name: 'তাৎক্ষণিক বিপদে', number: '999', tag: 'Emergency' },
         { name: 'বিকাশ হেল্পলাইন', number: '16247', tag: 'MFS' },
-        { name: 'বিটিআরসি কমপ্লেইন', number: '100', tag: 'টেলিকম' },
       ],
     },
   ]);
@@ -1902,13 +2097,19 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => () => requestRef.current?.abort(), []);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+    });
   }, [messages, isTyping]);
 
   const sendMessage = async (textToSend?: string) => {
     const query = (textToSend || inputMessage).trim();
-    if (!query || isTyping) return;
+    if (!query || isTyping || requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
 
     const userMsgId = 'u_' + Date.now();
     const userMsg = {
@@ -1923,12 +2124,21 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
     setIsTyping(true);
 
     try {
-      const history = messages.slice(-4).map((m) => ({ role: m.role, content: m.text }));
-      const res = await post<{
+      const history = messages
+        .slice(-4)
+        .map((m) => ({ role: m.role, content: m.text.slice(0, 3000) }));
+      const res = await api<{
         reply: string;
         suggestions: string[];
         hotlines: Array<{ name: string; number: string; tag: string }>;
-      }>('/assistant', { message: query, history });
+        source?: 'local' | 'ai';
+        externalUsed?: boolean;
+      }>('/assistant', {
+        method: 'POST',
+        body: JSON.stringify({ message: query, history, external }),
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
 
       setMessages((prev) => [
         ...prev,
@@ -1939,24 +2149,31 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           suggestions: res.suggestions,
           hotlines: res.hotlines,
+          source: res.source || 'local',
+          externalUsed: res.externalUsed,
         },
       ]);
-    } catch {
+    } catch (error) {
+      if (controller.signal.aborted) return;
       setMessages((prev) => [
         ...prev,
         {
           id: 'bot_' + Date.now(),
           role: 'assistant',
-          text: '⚠️ কোনো অবস্থাতেই আপনার বিকাশ/নগদ পিন (PIN), ওটিপি বা পাসওয়ার্ড কারো সাথে শেয়ার করবেন না। জরুরি পুলিশি সহায়তায় ৯৯৯ অথবা বিকাশ হটলাইন ১৬২৪৭ এ যোগাযোগ করুন।',
+          text:
+            (error as Error).message +
+            '\n\nএটি সার্ভার থেকে পাওয়া উত্তর নয়। সাধারণ নিরাপত্তা নির্দেশনা: পিন, ওটিপি বা পাসওয়ার্ড অন্য কাউকে দেবেন না। সন্দেহ হলে প্রতিষ্ঠানের অফিসিয়াল হটলাইনে যোগাযোগ করুন। তাৎক্ষণিক বিপদে ৯৯৯-এ কল করুন।',
+          source: 'error',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           hotlines: [
-            { name: 'National Police Emergency', number: '999', tag: '24/7 Police' },
+            { name: 'Immediate danger: National Emergency', number: '999', tag: 'Emergency' },
             { name: 'bKash Hotline', number: '16247', tag: 'MFS Desk' },
           ],
         },
       ]);
     } finally {
-      setIsTyping(false);
+      if (!controller.signal.aborted) setIsTyping(false);
+      if (requestRef.current === controller) requestRef.current = null;
     }
   };
 
@@ -1980,19 +2197,24 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
     <div className="modal-backdrop" onClick={onClose}>
       <div
         className="modal cyber-assistant-modal"
+        ref={modalRef}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="Cyber Safety AI Assistant"
+        aria-modal="true"
+        aria-label="Cyber safety guidance assistant"
       >
         <div className="assistant-modal-header">
           <div className="assistant-title-box">
             <div className="assistant-avatar">
               <Bot size={22} />
-              <span className="online-indicator-dot" />
             </div>
             <div>
               <strong>SafeLink সাইবার এআই সহকারী</strong>
-              <small>Cyber Safety Copilot · ২৪/৭ সক্রিয় এআই বিশেষজ্ঞ</small>
+              <small>
+                {external
+                  ? 'External AI requested · response source shown below'
+                  : 'Local curated guidance · AI off'}
+              </small>
             </div>
           </div>
           <button className="icon-button" onClick={onClose} aria-label="Close">
@@ -2000,7 +2222,12 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div className="assistant-chat-body">
+        <div
+          className="assistant-chat-body"
+          role="log"
+          aria-live="polite"
+          aria-label="Assistant conversation"
+        >
           {messages.map((m) => (
             <div key={m.id} className={`chat-message-row ${m.role}`}>
               {m.role === 'assistant' && (
@@ -2020,6 +2247,17 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
                   </div>
                 )}
                 <span className="chat-timestamp">{m.time}</span>
+                {m.source && (
+                  <small className="chat-source">
+                    {m.source === 'ai'
+                      ? 'External AI response · may be incorrect'
+                      : m.source === 'error'
+                        ? 'Connection error · general safety reminder'
+                        : m.externalUsed
+                          ? 'External AI request attempted · local guidance shown'
+                          : 'Local curated guidance'}
+                  </small>
+                )}
               </div>
             </div>
           ))}
@@ -2035,7 +2273,7 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
                   <span />
                   <span />
                 </div>
-                <small>এআই সহকারী বিশ্লেষণ করছে…</small>
+                <small>উত্তরের জন্য অপেক্ষা করছি…</small>
               </div>
             </div>
           )}
@@ -2049,6 +2287,7 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
                 key={s}
                 type="button"
                 className="suggestion-chip-btn"
+                disabled={isTyping}
                 onClick={() => sendMessage(s)}
               >
                 <Sparkles size={12} /> {s}
@@ -2057,6 +2296,21 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
+        <label className="assistant-consent">
+          <input
+            type="checkbox"
+            checked={external}
+            disabled={isTyping}
+            onChange={(e) => setExternal(e.target.checked)}
+          />
+          <span>
+            Use external AI{' '}
+            <small>
+              Sends your question and recent conversation excerpts to a configured AI provider.
+              Remove private information first.
+            </small>
+          </span>
+        </label>
         <form
           className="assistant-input-footer"
           onSubmit={(e) => {
@@ -2068,6 +2322,8 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
             type="text"
             className="assistant-text-input"
             placeholder="সাইবার নিরাপত্তা বা প্রতারণা সম্পর্কে প্রশ্ন লিখুন…"
+            aria-label="Your safety question"
+            maxLength={3000}
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             disabled={isTyping}
@@ -2101,111 +2357,70 @@ function SignInRequired({ requireAuth }: Pick<Props, 'requireAuth'>) {
     </div>
   );
 }
-function NationalThreatRadar() {
+function AnalysisOverview() {
   return (
     <div className="threat-radar-section">
       <div className="radar-header-banner">
         <div>
-          <span className="eyebrow">NATIONAL CYBER THREAT RADAR · BANGLADESH</span>
-          <h2>Live MFS & Financial Fraud Intelligence</h2>
-          <p>Real-time threat distribution and monitored cyber attack vectors across Bangladesh digital channels.</p>
+          <span className="eyebrow">EXPLAINABLE CHECKS</span>
+          <h2>Know what the scanner can see.</h2>
+          <p>
+            SafeLink analyzes submitted content. Its local rules check suspicious language and URL
+            patterns; external services run only when you choose them.
+          </p>
         </div>
-        <span className="radar-status-badge">
-          <span className="pulse-dot" /> LIVE DEFENSE SYNCHRONIZED
-        </span>
+        <span className="subtle-tag">No national monitoring feed</span>
       </div>
-
       <div className="radar-grid">
-        <div className="card radar-card">
-          <div className="radar-card-head">
-            <Activity size={18} />
-            <h3>National Attack Vector Distribution</h3>
+        {[
+          {
+            icon: Cpu,
+            title: 'Local language & URL rules',
+            text: 'Bangla, Banglish and English warning patterns, sensitive-information requests and look-alike domains. Scores describe matched indicators.',
+          },
+          {
+            icon: QrCode,
+            title: 'QR decoding & screenshot OCR',
+            text: 'Inspect a QR payload or read text from an uploaded screenshot. Review extracted text because OCR can make mistakes.',
+          },
+          {
+            icon: Users,
+            title: 'Reviewed community reports',
+            text: 'Approved reports can add supporting evidence. Reports alone do not establish fraud or coordinated activity.',
+          },
+          {
+            icon: Bot,
+            title: 'Optional external services',
+            text: 'AI interpretation and threat reputation require configured providers and your consent. The result lists unavailable or skipped checks.',
+          },
+        ].map((item) => (
+          <div className="card radar-card" key={item.title}>
+            <div className="radar-card-head">
+              <item.icon size={18} />
+              <h3>{item.title}</h3>
+            </div>
+            <p>{item.text}</p>
           </div>
-          <p className="card-sub">Top fraudulent vectors targeting Bangladeshi citizens (2025-2026)</p>
-          <div className="vector-bars">
-            {[
-              { name: 'MFS & Banking Impersonation (bKash/Nagad)', pct: 42, color: '#dc2626' },
-              { name: 'Fake Prize & Lottery Social Traps', pct: 26, color: '#ea580c' },
-              { name: 'OTP & Password Harvesting Pages', pct: 18, color: '#d97706' },
-              { name: 'Unverified Job & Visa Offers', pct: 14, color: '#4f46e5' },
-            ].map((v) => (
-              <div key={v.name} className="vector-row">
-                <div className="vector-label">
-                  <span>{v.name}</span>
-                  <strong>{v.pct}%</strong>
-                </div>
-                <div className="vector-track">
-                  <div className="vector-fill" style={{ width: `${v.pct}%`, backgroundColor: v.color }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="card radar-card">
-          <div className="radar-card-head">
-            <ShieldAlert size={18} />
-            <h3>High-Targeted Financial Brands Matrix</h3>
-          </div>
-          <p className="card-sub">Brands actively protected by SafeLink Homograph & Typo Engine</p>
-          <div className="brand-matrix-grid">
-            {[
-              { name: 'bKash Limited', target: '94% Attack Target Index', status: 'Protected', badge: 'Critical' },
-              { name: 'Nagad Postal MFS', target: '88% Attack Target Index', status: 'Protected', badge: 'High' },
-              { name: 'Brac Bank / Astha', target: '76% Attack Target Index', status: 'Protected', badge: 'Caution' },
-              { name: 'Islami Bank Cellfin', target: '71% Attack Target Index', status: 'Protected', badge: 'Caution' },
-            ].map((b) => (
-              <div key={b.name} className="brand-matrix-item">
-                <div>
-                  <strong>{b.name}</strong>
-                  <small>{b.target}</small>
-                </div>
-                <span className="brand-matrix-pill">{b.status}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="card radar-stats-strip">
-        <div>
-          <strong>4-Layer Heuristic</strong>
-          <span>Deterministic Edge Filter</span>
-        </div>
-        <div>
-          <strong>Levenshtein Matrix</strong>
-          <span>Homograph Typo Defense</span>
-        </div>
-        <div>
-          <strong>Mistral AI Engine</strong>
-          <span>Bangla/Banglish Context</span>
-        </div>
-        <div>
-          <strong>Zero-SSRF Policy</strong>
-          <span>Safe Sandboxed Execution</span>
-        </div>
+        ))}
       </div>
     </div>
   );
 }
 
 function Dashboard(props: Props & { version: number; onOpen: (r: ScanResult) => void }) {
-  const [data, setData] = useState<any>(null),
-    [error, setError] = useState('');
-  useEffect(() => {
-    if (props.user)
-      api('/dashboard')
-        .then(setData)
-        .catch((e) => setError(e.message));
-  }, [props.user, props.version]);
+  const { data, error, loading, reload } = useApiResource<any>(
+    '/dashboard',
+    Boolean(props.user),
+    props.version,
+  );
   return (
     <>
       <PageTitle
-        eyebrow="NATIONAL & PERSONAL OVERVIEW"
-        title="Cyber Safety & Threat Intelligence"
-        text="National threat landscape overview and your personal verified activity."
+        eyebrow="WORKSPACE OVERVIEW"
+        title="Your digital safety activity"
+        text="Understand available checks and review your own saved activity."
       />
-      <NationalThreatRadar />
+      <AnalysisOverview />
       <div className="heading-row" style={{ marginTop: '28px' }}>
         <PageTitle
           eyebrow="YOUR PERSONAL ACTIVITY"
@@ -2216,8 +2431,13 @@ function Dashboard(props: Props & { version: number; onOpen: (r: ScanResult) => 
       {!props.user ? (
         <SignInRequired {...props} />
       ) : error ? (
-        <div className="error">{error}</div>
-      ) : !data ? (
+        <div className="error" role="alert">
+          {error}{' '}
+          <Button variant="outline" onClick={reload}>
+            Try again
+          </Button>
+        </div>
+      ) : loading || !data ? (
         <p>Loading your activity…</p>
       ) : (
         <>
@@ -2265,7 +2485,12 @@ function Dashboard(props: Props & { version: number; onOpen: (r: ScanResult) => 
             <h2>Recent scans</h2>
             {data.recent.length ? (
               data.recent.map((r: ScanResult) => (
-                <button className="recent-row dashboard-open" key={r.id} onClick={() => props.onOpen(r)} aria-label={"View scan: " + r.preview}>
+                <button
+                  className="recent-row dashboard-open"
+                  key={r.id}
+                  onClick={() => props.onOpen(r)}
+                  aria-label={'View scan: ' + r.preview}
+                >
                   <ScanLine size={18} />
                   <span>
                     <strong>{r.preview}</strong>
@@ -2290,198 +2515,114 @@ function Dashboard(props: Props & { version: number; onOpen: (r: ScanResult) => 
 
 function HelplineDirectory({ notify }: { notify: (s: string) => void }) {
   const [query, setQuery] = useState('');
-  const [activeCategory, setActiveCategory] = useState<string>('all');
-
+  const [activeCategory, setActiveCategory] = useState('all');
   const categories = [
-    { id: 'all', label: 'All Services' },
-    { id: 'mfs', label: 'MFS & Wallets' },
-    { id: 'law', label: 'Cyber Police & BTRC' },
-    { id: 'bank', label: 'Commercial Banks' },
-    { id: 'rules', label: '৫টি গোল্ডেন রুলস' },
+    { id: 'all', label: 'All contacts' },
+    { id: 'mfs', label: 'MFS & banking' },
+    { id: 'law', label: 'Emergency & police' },
+    { id: 'rules', label: 'Safety habits' },
   ];
-
-  const helplines = [
+  const contacts = [
     {
       category: 'mfs',
-      name: 'bKash Limited',
-      bengaliName: 'বিকাশ লিমিটেড',
+      name: 'bKash',
+      bengaliName: 'বিকাশ',
       hotline: '16247',
-      shortcode: '*247#',
       domain: 'bkash.com',
-      verified: true,
-      tag: 'Critical MFS',
-      desc: 'Never share your 5-digit PIN or SMS OTP with anyone calling from any number.',
+      tag: 'Customer support',
+      desc: 'Ask customer support about account security or a suspicious transaction.',
+      source: 'https://www.bkash.com/en/page/terms-of-use-bkash-app',
     },
     {
       category: 'mfs',
-      name: 'Nagad (Postal MFS)',
-      bengaliName: 'নগদ (ডাক বিভাগ)',
+      name: 'Nagad',
+      bengaliName: 'নগদ',
       hotline: '16167',
-      shortcode: '*167#',
       domain: 'nagad.com.bd',
-      verified: true,
-      tag: 'Critical MFS',
-      desc: 'Only dial *167# from your registered mobile SIM. Nagad never calls asking for PIN.',
+      tag: 'Customer support',
+      desc: 'Contact Nagad about a lost phone, possible PIN misuse or account security.',
+      source: 'https://nagadislamic.com.bd/bn/terms-and-conditions/',
     },
     {
       category: 'mfs',
-      name: 'Rocket (Dutch-Bangla Bank)',
-      bengaliName: 'রকেট (ডিবিবিএল)',
+      name: 'Rocket / Dutch-Bangla Bank',
+      bengaliName: 'রকেট / ডাচ-বাংলা ব্যাংক',
       hotline: '16216',
-      shortcode: '*322#',
-      domain: 'dutchbanglabank.com/rocket',
-      verified: true,
-      tag: 'MFS Hotlist',
-      desc: 'DBBL Core MFS. Call 16216 immediately if your phone is lost or balance is compromised.',
-    },
-    {
-      category: 'mfs',
-      name: 'Upay (UCB Fintech)',
-      bengaliName: 'উপায় (ইউসিবি)',
-      hotline: '16268',
-      shortcode: '*268#',
-      domain: 'upaybd.com',
-      verified: true,
-      tag: 'MFS Hotlist',
-      desc: 'United Commercial Bank MFS customer support and transaction dispute line.',
+      domain: 'dutchbanglabank.com',
+      tag: 'Bank call center',
+      desc: 'DBBL customer services and complaint contact.',
+      source: 'https://www.dutchbanglabank.com/complaint-cell/central-customer-services.html',
     },
     {
       category: 'law',
-      name: 'National Emergency Dispatch',
-      bengaliName: 'জাতীয় জরুরি সেবা (পুলিশ/অ্যাম্বুলেন্স)',
+      name: 'National Emergency Service',
+      bengaliName: 'জাতীয় জরুরি সেবা',
       hotline: '999',
-      shortcode: '999 (Toll Free)',
       domain: 'police.gov.bd',
-      verified: true,
-      tag: '24/7 Dispatch',
-      desc: 'Toll-free 24/7 emergency dispatch for cyber extortion, physical threat or instant police aid.',
+      tag: 'Immediate danger',
+      desc: 'Police, fire or ambulance emergency assistance. Use for immediate danger; contact your financial institution for an account dispute.',
+      source: 'https://telecom-police.portal.gov.bd/pages/static-pages/695e3b0cc4774958d7b72321',
     },
     {
       category: 'law',
-      name: 'CID Cyber Police Centre (CPC)',
-      bengaliName: 'সিআইডি সাইবার পুলিশ সেন্টার',
+      name: 'Police Cyber Support for Women',
+      bengaliName: 'নারীদের জন্য পুলিশ সাইবার সাপোর্ট',
       hotline: '01320000888',
-      shortcode: '01320-000888',
-      domain: 'cid.police.gov.bd',
-      verified: true,
-      tag: 'Cyber Police HQ',
-      desc: 'Official specialized cyber crime investigation wing of Bangladesh Police. Email: smmcpc-cid@police.gov.bd',
-    },
-    {
-      category: 'law',
-      name: 'BTRC Telecom Consumer Desk',
-      bengaliName: 'বিটিআরসি সাইবার ও কল কমপ্লেইন',
-      hotline: '100',
-      shortcode: '100 (Toll Free)',
-      domain: 'btrc.gov.bd',
-      verified: true,
-      tag: 'Telecom Regulator',
-      desc: 'Report spoofed caller IDs, illegal VoIP calls, mass scam SMS and unapproved SIM usage.',
-    },
-    {
-      category: 'law',
-      name: 'DMP Cyber Crime Division',
-      bengaliName: 'ডিএমপি সাইবার ক্রাইম ইনভেস্টিগেশন',
-      hotline: '01769691522',
-      shortcode: '01769-691522',
-      domain: 'dmp.gov.bd',
-      verified: true,
-      tag: 'Dhaka Police Desk',
-      desc: 'Dhaka Metropolitan Police dedicated cyber fraud investigation team for GD and case registration.',
-    },
-    {
-      category: 'bank',
-      name: 'BRAC Bank (Astha App Desk)',
-      bengaliName: 'ব্র্যাক ব্যাংক (আস্থা অ্যাপ)',
-      hotline: '16221',
-      shortcode: '+88028801221',
-      domain: 'bracbank.com',
-      verified: true,
-      tag: 'Commercial Bank',
-      desc: '24/7 card blocking and Astha digital banking security desk.',
-    },
-    {
-      category: 'bank',
-      name: 'Islami Bank Bangladesh (Cellfin)',
-      bengaliName: 'ইসলামী ব্যাংক (সেলফিন)',
-      hotline: '16259',
-      shortcode: '+88028331090',
-      domain: 'islamibankbd.com',
-      verified: true,
-      tag: 'Commercial Bank',
-      desc: 'Contact for Cellfin unauthorized transactions and emergency ATM card deactivation.',
-    },
-    {
-      category: 'bank',
-      name: 'The City Bank (Citytouch)',
-      bengaliName: 'সিটি ব্যাংক (সিটিটাচ)',
-      hotline: '16234',
-      shortcode: '+88028331040',
-      domain: 'thecitybank.com',
-      verified: true,
-      tag: 'Commercial Bank',
-      desc: '24/7 online fraud monitoring and debit/credit card blocking hotline.',
-    },
-    {
-      category: 'bank',
-      name: 'Eastern Bank Limited (EBL Skybanking)',
-      bengaliName: 'ইস্টার্ন ব্যাংক (ইবিএল)',
-      hotline: '16230',
-      shortcode: '+8809612316230',
-      domain: 'ebl.com.bd',
-      verified: true,
-      tag: 'Commercial Bank',
-      desc: 'Helpline for international card dispute and Skybanking unauthorized transaction freeze.',
+      domain: 'police.gov.bd',
+      tag: 'Women cyber support',
+      desc: 'Specialist cyber support for women. This number belongs to PCSW, not a general CID hotline.',
+      source: 'https://www.police.gov.bd/en/police_cyber_support_for_women',
     },
   ];
-
-  const goldenRules = [
+  const rules = [
     {
-      title: '১. পিন (PIN) ও ওটিপি (OTP) কখনোই কারো নয়',
-      desc: 'কোনো ব্যাংক, বিকাশ বা সরকারি কর্মকর্তা কখনোই আপনার গোপন পিন বা ওটিপি জানতে চাইবে না। কেউ পিন চাইলেই বুঝবেন সে ১০০% প্রতারক।',
+      title: 'পিন, ওটিপি ও পাসওয়ার্ড গোপন রাখুন',
+      desc: 'অন্য কাউকে এসব তথ্য বলবেন না। নিজের পরিচিত অফিসিয়াল অ্যাপ বা ঠিকানা দিয়ে যাচাই করুন।',
     },
     {
-      title: '২. "ভুল করে টাকা চলে গেছে" নাটকে সতর্ক থাকুন',
-      desc: 'কেউ ফোন করে টাকা ফেরত চাইলে কখনো সরাসরি টাকা পাঠাবেন না। আগে নিজের ফোনের অফিশিয়াল অ্যাপ বা কোড ডায়াল করে মূল ব্যালেন্স যাচাই করুন।',
+      title: 'টাকা ফেরত চাওয়ার দাবি যাচাই করুন',
+      desc: 'ফোন বা স্ক্রিনশটের দাবির ওপর নির্ভর না করে নিজের অ্যাপে লেনদেন দেখুন। সন্দেহ হলে প্রতিষ্ঠানের সহায়তা নিন।',
     },
     {
-      title: '৩. লটারি বা চাকরির ফি ফাঁদ',
-      desc: 'আসল কোনো লটারি বা সরকারি/বেসরকারি চাকরির ক্ষেত্রে পুরস্কার নেওয়ার জন্য আগে টাকা বা বিকাশ ফি পাঠাতে হয় না।',
+      title: 'অপ্রত্যাশিত ফি বা পুরস্কারের অনুরোধে থামুন',
+      desc: 'আগে টাকা পাঠানো বা গোপন তথ্য দেওয়ার অনুরোধ পেলে স্বাধীনভাবে প্রতিষ্ঠান ও দাবিটি যাচাই করুন।',
     },
     {
-      title: '৪. অপরিচিত লিংকে পাসওয়ার্ড না দেওয়া',
-      desc: 'মেসেজে আসা অচেনা লিংকে ক্লিক করে বিকাশ, নগদ বা ব্যাংকের পিন/পাসওয়ার্ড লিখবেন না। সবসময় অফিশিয়াল অ্যাপ ও ডোমেন ব্যবহার করুন।',
+      title: 'পরিচিত যোগাযোগ মাধ্যম ব্যবহার করুন',
+      desc: 'অচেনা লিংকের লগইন পাতায় তথ্য না দিয়ে নিজে প্রতিষ্ঠানের অ্যাপ বা ঠিকানা খুলুন।',
     },
     {
-      title: '৫. সন্দেহ হলেই তাৎক্ষণিক কল দিয়ে ব্লক করুন',
-      desc: 'কোনো প্রতারণামূলক লেনদেনের সন্দেহ হলে দেরি না করে সরাসরি অফিশিয়াল হটলাইনে (যেমন বিকাশ ১৬২৪৭ বা নগদ ১৬১৬৭) কল দিয়ে অ্যাকাউন্ট সাময়িক স্থগিত করুন।',
+      title: 'সন্দেহ হলে দ্রুত সহায়তা নিন',
+      desc: 'মূল মেসেজ, সময় ও লেনদেনের রসিদ রাখুন। প্রতিষ্ঠানের কাছে অ্যাকাউন্ট সুরক্ষিত করার করণীয় জানতে চান।',
     },
   ];
-
-  const filtered = helplines.filter((item) => {
-    const matchesCat = activeCategory === 'all' || item.category === activeCategory;
-    const matchesQuery =
-      query.trim() === '' ||
-      item.name.toLowerCase().includes(query.toLowerCase()) ||
-      item.bengaliName.includes(query) ||
-      item.hotline.includes(query) ||
-      item.domain.toLowerCase().includes(query.toLowerCase());
-    return matchesCat && matchesQuery;
-  });
-
+  const term = query.trim().toLowerCase();
+  const filtered = contacts.filter(
+    (c) =>
+      (activeCategory === 'all' || c.category === activeCategory) &&
+      (!term || (c.name + c.bengaliName + c.hotline + c.domain).toLowerCase().includes(term)),
+  );
+  async function copyNumber(number: string) {
+    try {
+      await navigator.clipboard.writeText(number);
+      notify('Copied ' + number + '.');
+    } catch {
+      notify('Could not copy. Select the number manually or tap it to call.');
+    }
+  }
   return (
     <div className="directory-page">
       <PageTitle
-        eyebrow="OFFLINE DIRECTORY & OFFICIAL HELPLINE"
-        title="National Cyber & Financial Helpline Directory"
-        text="Verified official hotlines, USSD codes and whitelisted domains across Bangladesh. Works completely client-side without internet."
+        eyebrow="SOURCED SUPPORT CONTACTS"
+        title="Find the right support contact."
+        text="Contacts checked against official sources on 4 October 2026. Open the source to confirm current details. Once this page is loaded, filtering needs no API request."
       />
-
       <div className="directory-controls">
         <div className="search-box">
           <Search size={18} />
           <input
-            placeholder="Search by institution, hotline (16247) or domain (bkash.com)…"
+            aria-label="Search support contacts"
+            placeholder="Search institution, number or domain…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -2491,6 +2632,7 @@ function HelplineDirectory({ notify }: { notify: (s: string) => void }) {
             <button
               key={c.id}
               type="button"
+              aria-pressed={activeCategory === c.id}
               className={'filter-pill ' + (activeCategory === c.id ? 'active' : '')}
               onClick={() => setActiveCategory(c.id)}
             >
@@ -2499,87 +2641,84 @@ function HelplineDirectory({ notify }: { notify: (s: string) => void }) {
           ))}
         </div>
       </div>
-
-      {activeCategory === 'rules' || query.toLowerCase().includes('rule') || query.includes('নিয়ম') ? (
-        <div className="golden-rules-section">
-          <h3>🛡️ প্রতারণা থেকে বাঁচার শীর্ষ ৫টি গোল্ডেন রুলস (Golden Rules)</h3>
-          <p className="card-sub">ইন্টারনেট না থাকলেও সাধারণ মানুষ এই ৫টি নিয়ম মেনে আর্থিক ক্ষতি থেকে বাঁচতে পারবেন:</p>
-          <div className="golden-rules-grid">
-            {goldenRules.map((rule, i) => (
-              <div key={i} className="card golden-rule-card">
-                <strong>{rule.title}</strong>
-                <p>{rule.desc}</p>
+      {activeCategory === 'rules' ? (
+        <div className="golden-rules-grid">
+          {rules.map((rule) => (
+            <div key={rule.title} className="card golden-rule-card">
+              <strong>{rule.title}</strong>
+              <p>{rule.desc}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <>
+          {!filtered.length && (
+            <Empty
+              title="No matching contacts"
+              text="Try another institution or clear your search."
+            />
+          )}
+          <div className="directory-cards-grid">
+            {filtered.map((c) => (
+              <div key={c.hotline} className="card directory-card">
+                <div className="dir-card-head">
+                  <div>
+                    <strong>{c.name}</strong>
+                    <span className="bengali-sub">{c.bengaliName}</span>
+                  </div>
+                  <span className="dir-tag">{c.tag}</span>
+                </div>
+                <p className="dir-desc">{c.desc}</p>
+                <div className="dir-numbers-strip">
+                  <div className="num-block">
+                    <small>CONTACT NUMBER</small>
+                    <a className="hotline-link" href={'tel:' + c.hotline}>
+                      <PhoneCall size={14} />
+                      {c.hotline}
+                    </a>
+                  </div>
+                </div>
+                <div className="dir-foot">
+                  <a
+                    className="domain-pill"
+                    href={c.source}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Official source <ExternalLink size={13} />
+                  </a>
+                  <button type="button" className="copy-btn" onClick={() => copyNumber(c.hotline)}>
+                    Copy number
+                  </button>
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      ) : null}
-
-      <div className="directory-cards-grid">
-        {filtered.map((h) => (
-          <div key={h.name} className="card directory-card">
-            <div className="dir-card-head">
-              <div>
-                <strong>{h.name}</strong>
-                <span className="bengali-sub">{h.bengaliName}</span>
-              </div>
-              <span className="dir-tag">{h.tag}</span>
-            </div>
-
-            <p className="dir-desc">{h.desc}</p>
-
-            <div className="dir-numbers-strip">
-              <div className="num-block">
-                <small>OFFICIAL HOTLINE</small>
-                <a href={`tel:${h.hotline}`} className="hotline-link">
-                  <PhoneCall size={14} /> {h.hotline}
-                </a>
-              </div>
-              <div className="num-block">
-                <small>USSD / CODE</small>
-                <code>{h.shortcode}</code>
-              </div>
-            </div>
-
-            <div className="dir-foot">
-              <span className="domain-pill">
-                <CheckCircle2 size={13} /> {h.domain}
-              </span>
-              <button
-                type="button"
-                className="copy-btn"
-                onClick={() => {
-                  navigator.clipboard.writeText(h.hotline);
-                  notify(`Copied ${h.hotline} (${h.name}) to clipboard.`);
-                }}
-              >
-                Copy Number
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+        </>
+      )}
     </div>
   );
 }
 
 function HistoryPage(props: Props & { version: number; initialSelection?: ScanResult | null }) {
-  const [rows, setRows] = useState<ScanResult[]>([]),
-    [query, setQuery] = useState(''),
+  const {
+    data,
+    setData,
+    error,
+    loading,
+    reload: load,
+  } = useApiResource<ScanResult[]>('/scans', Boolean(props.user), props.version);
+  const rows = data || [];
+  const [query, setQuery] = useState(''),
     [selected, setSelected] = useState<ScanResult | null>(null),
-    [error, setError] = useState(''),
-    [loading, setLoading] = useState(true);
-  function load() {
-    setError('');
-    setLoading(true);
-    api<ScanResult[]>('/scans')
-      .then(data => { setRows(data); setSelected(current => data.find(row => row.id === (current?.id || props.initialSelection?.id)) || null); })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }
+    [deleting, setDeleting] = useState<string | null>(null);
   useEffect(() => {
-    if (props.user) load();
-  }, [props.user, props.version]);
+    if (data)
+      setSelected(
+        (current) =>
+          data.find((row) => row.id === (current?.id || props.initialSelection?.id)) || null,
+      );
+  }, [data, props.initialSelection]);
   return (
     <>
       <PageTitle
@@ -2600,10 +2739,28 @@ function HistoryPage(props: Props & { version: number; initialSelection?: ScanRe
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          {error && <p className="error">{error}</p>}
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
           {loading && <p role="status">Loading your scans…</p>}
-          {error && <Button variant="outline" onClick={load}>Try again</Button>}
-          {!loading && !error && rows.length > 0 && !rows.some(r => (r.preview + r.level + r.kind).toLowerCase().includes(query.toLowerCase())) && <Empty title="No matching scans" text="Try another domain, scan type or risk level." />}
+          {error && (
+            <Button variant="outline" onClick={load}>
+              Try again
+            </Button>
+          )}
+          {!loading &&
+            !error &&
+            rows.length > 0 &&
+            !rows.some((r) =>
+              (r.preview + r.level + r.kind).toLowerCase().includes(query.toLowerCase()),
+            ) && (
+              <Empty
+                title="No matching scans"
+                text="Try another domain, scan type or risk level."
+              />
+            )}
           <div className="card history-list">
             {rows
               .filter((r) =>
@@ -2611,7 +2768,11 @@ function HistoryPage(props: Props & { version: number; initialSelection?: ScanRe
               )
               .map((r) => (
                 <div className="recent-row" key={r.id}>
-                  <button className="row-open" onClick={() => setSelected(r)}>
+                  <button
+                    className="row-open"
+                    aria-pressed={selected?.id === r.id}
+                    onClick={() => setSelected(r)}
+                  >
                     <ScanLine size={18} />
                     <span>
                       <strong>{r.preview}</strong>
@@ -2625,14 +2786,18 @@ function HistoryPage(props: Props & { version: number; initialSelection?: ScanRe
                   <button
                     className="icon-button"
                     aria-label="Delete scan"
+                    disabled={Boolean(deleting)}
                     onClick={async () => {
                       if (!confirm('Delete this scan permanently?')) return;
+                      setDeleting(r.id);
                       try {
                         await api('/scans/' + r.id, { method: 'DELETE' });
-                        load();
                         if (selected?.id === r.id) setSelected(null);
+                        props.refresh();
                       } catch (e) {
                         props.notify((e as Error).message);
+                      } finally {
+                        setDeleting(null);
                       }
                     }}
                   >
@@ -2647,35 +2812,49 @@ function HistoryPage(props: Props & { version: number; initialSelection?: ScanRe
               />
             )}
           </div>
-          {selected && <Result result={selected} {...props} onSaved={(id, saved) => {setRows(rows => rows.map(row => row.id === id ? {...row, saved} : row));setSelected(row => row ? {...row, saved} : row);}} />}
+          {selected && !loading && !error && rows.some((row) => row.id === selected.id) && (
+            <Result
+              key={selected.id}
+              result={selected}
+              {...props}
+              onSaved={(id, saved) => {
+                setData(
+                  (rows) => rows?.map((row) => (row.id === id ? { ...row, saved } : row)) || [],
+                );
+                setSelected((row) => (row?.id === id ? { ...row, saved } : row));
+                props.refresh();
+              }}
+            />
+          )}
         </>
       )}
     </>
   );
 }
-function Community(props: Props) {
-  const [categoryOptions, setCategoryOptions] = useState<string[]>([...categories]);
-  const [rows, setRows] = useState<any[]>([]),
-    [graph, setGraph] = useState<any>(null),
-    [entity, setEntity] = useState(''),
+function Community(props: Props & { health: any }) {
+  const reportsResource = useApiResource<any[]>('/reports', Boolean(props.user));
+  const graphResource = useApiResource<any>('/graph', Boolean(props.user));
+  const categoriesResource = useApiResource<string[]>('/categories', Boolean(props.user));
+  const categoryOptions = categoriesResource.data || [...categories];
+  const rows = reportsResource.data || [];
+  const graph = graphResource.data;
+  const [entity, setEntity] = useState(''),
     [entityType, setEntityType] = useState('domain'),
     [category, setCategory] = useState<string>(categories[0]),
     [description, setDescription] = useState(''),
     [busy, setBusy] = useState(false);
-  const load = () => {
-    api<string[]>('/categories')
-      .then(setCategoryOptions)
-      .catch(() => {});
-    api('/reports')
-      .then(setRows)
-      .catch((e) => props.notify(e.message));
-    api('/graph')
-      .then(setGraph)
-      .catch(() => {});
-  };
+  const requiresVerification = Boolean(
+    props.user && !props.user.verified && props.health?.storage !== 'temporary-memory',
+  );
   useEffect(() => {
-    if (props.user) load();
-  }, [props.user]);
+    if (categoriesResource.data?.length && !categoriesResource.data.includes(category))
+      setCategory(categoriesResource.data[0]);
+  }, [categoriesResource.data, category]);
+  const load = () => {
+    reportsResource.reload();
+    graphResource.reload();
+    categoriesResource.reload();
+  };
   return (
     <>
       <PageTitle
@@ -2687,11 +2866,21 @@ function Community(props: Props) {
         <SignInRequired {...props} />
       ) : (
         <>
+          {(reportsResource.error || graphResource.error) && (
+            <p className="error" role="alert">
+              {reportsResource.error || graphResource.error}{' '}
+              <Button variant="outline" size="sm" onClick={load}>
+                Try again
+              </Button>
+            </p>
+          )}
           <div className="two-grid">
             <form
               className="card stack"
+              aria-busy={busy}
               onSubmit={async (e) => {
                 e.preventDefault();
+                if (busy || requiresVerification) return;
                 setBusy(true);
                 try {
                   await post('/reports', { entity, entityType, category, description });
@@ -2709,7 +2898,11 @@ function Community(props: Props) {
               <h2>Report suspicious content</h2>
               <label>
                 Content type
-                <select value={entityType} onChange={(e) => setEntityType(e.target.value)}>
+                <select
+                  disabled={busy}
+                  value={entityType}
+                  onChange={(e) => setEntityType(e.target.value)}
+                >
                   <option value="domain">Domain</option>
                   <option value="url">URL</option>
                   <option value="phone">Phone number</option>
@@ -2722,12 +2915,27 @@ function Community(props: Props) {
                   value={entity}
                   onChange={(e) => setEntity(e.target.value)}
                   required
+                  disabled={busy}
+                  minLength={3}
                   maxLength={2048}
+                  placeholder={
+                    entityType === 'phone'
+                      ? '+8801XXXXXXXXX'
+                      : entityType === 'message'
+                        ? 'Suspicious message without personal details'
+                        : entityType === 'url'
+                          ? 'https://example.com/path'
+                          : 'example.com'
+                  }
                 />
               </label>
               <label>
                 Category
-                <select value={category} onChange={(e) => setCategory(e.target.value)}>
+                <select
+                  disabled={busy}
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                >
                   {categoryOptions.map((c) => (
                     <option key={c}>{c}</option>
                   ))}
@@ -2741,10 +2949,16 @@ function Community(props: Props) {
                   minLength={5}
                   maxLength={1000}
                   required
+                  disabled={busy}
                   placeholder="Explain the concern. Do not include OTPs, passwords or personal information."
                 />
               </label>
-              <Button disabled={busy} type="submit">
+              {requiresVerification && (
+                <p className="small-print">
+                  Verify your email in Settings before submitting reports.
+                </p>
+              )}
+              <Button disabled={busy || requiresVerification} type="submit">
                 {busy ? 'Submitting…' : 'Submit report'}
                 <ArrowRight size={16} />
               </Button>
@@ -2753,7 +2967,11 @@ function Community(props: Props) {
               <h2>
                 Your reports <span className="count">{rows.length}</span>
               </h2>
-              {rows.length ? (
+              {reportsResource.loading ? (
+                <p role="status">Loading your reports…</p>
+              ) : reportsResource.error ? (
+                <p>Reports could not be loaded.</p>
+              ) : rows.length ? (
                 rows.map((r) => (
                   <div className="report-row" key={r.id}>
                     <strong>{r.entityType === 'message' ? 'Message fingerprint' : r.entity}</strong>
@@ -2775,7 +2993,11 @@ function Community(props: Props) {
               Relationships between your reported entities and categories. A connection is not proof
               of coordinated activity.
             </p>
-            {graph?.nodes.length ? (
+            {graphResource.loading ? (
+              <p role="status">Loading connections…</p>
+            ) : graphResource.error ? (
+              <p>Connections could not be loaded.</p>
+            ) : graph?.nodes.length ? (
               <div className="graph-list">
                 {graph.edges.map((e: any, i: number) => (
                   <div key={i}>
@@ -2800,28 +3022,43 @@ function Community(props: Props) {
     </>
   );
 }
-function Family(props: Props & { onSimple: () => void }) {
-  const [contacts, setContacts] = useState<any[]>([]),
-    [scans, setScans] = useState<ScanResult[]>([]),
-    [alerts, setAlerts] = useState<any[]>([]),
-    [name, setName] = useState(''),
+function Family(props: Props & { onSimple: () => void; simpleBusy: boolean; health: any }) {
+  const contactsResource = useApiResource<any[]>('/contacts', Boolean(props.user));
+  const scansResource = useApiResource<ScanResult[]>('/scans', Boolean(props.user));
+  const alertsResource = useApiResource<any[]>('/alerts', Boolean(props.user));
+  const contacts = contactsResource.data || [];
+  const scans = scansResource.data || [];
+  const alerts = alertsResource.data || [];
+  const [name, setName] = useState(''),
     [email, setEmail] = useState(''),
     [scanId, setScanId] = useState(''),
-    [contactId, setContactId] = useState('');
-  const load = () => {
-    api('/contacts')
-      .then(setContacts)
-      .catch((e) => props.notify(e.message));
-    api('/scans')
-      .then(setScans)
-      .catch(() => {});
-    api('/alerts')
-      .then(setAlerts)
-      .catch(() => {});
-  };
+    [contactId, setContactId] = useState(''),
+    [adding, setAdding] = useState(false),
+    [sending, setSending] = useState(false),
+    [removing, setRemoving] = useState<string | null>(null);
   useEffect(() => {
-    if (props.user) load();
-  }, [props.user]);
+    if (contactsResource.data && !contactsResource.data.some((contact) => contact.id === contactId))
+      setContactId('');
+  }, [contactsResource.data, contactId]);
+  useEffect(() => {
+    if (scansResource.data && !scansResource.data.some((scan) => scan.id === scanId)) setScanId('');
+  }, [scansResource.data, scanId]);
+  const canSend = Boolean(
+    props.user?.verified &&
+    props.health?.email &&
+    scans.some((scan) => scan.id === scanId) &&
+    contacts.some((contact) => contact.id === contactId) &&
+    !contactsResource.loading &&
+    !scansResource.loading &&
+    !contactsResource.error &&
+    !scansResource.error &&
+    !removing,
+  );
+  const load = () => {
+    contactsResource.reload();
+    scansResource.reload();
+    alertsResource.reload();
+  };
   return (
     <>
       <PageTitle
@@ -2834,19 +3071,32 @@ function Family(props: Props & { onSimple: () => void }) {
           <h2>Simple mode</h2>
           <p>Larger text and clearer spacing for an easier scan experience.</p>
         </div>
-        <Button variant="outline" onClick={props.onSimple}>
-          {props.user?.simpleMode ? 'Turn off' : 'Turn on'} simple mode
+        <Button variant="outline" onClick={props.onSimple} disabled={props.simpleBusy}>
+          {props.simpleBusy
+            ? 'Updating…'
+            : `${props.user?.simpleMode ? 'Turn off' : 'Turn on'} simple mode`}
         </Button>
       </div>
       {!props.user ? (
         <SignInRequired {...props} />
       ) : (
         <>
+          {(contactsResource.error || scansResource.error || alertsResource.error) && (
+            <p className="error" role="alert">
+              {contactsResource.error || scansResource.error || alertsResource.error}{' '}
+              <Button size="sm" variant="outline" onClick={load}>
+                Try again
+              </Button>
+            </p>
+          )}
           <div className="two-grid">
             <form
               className="card stack"
+              aria-busy={adding}
               onSubmit={async (e) => {
                 e.preventDefault();
+                if (adding) return;
+                setAdding(true);
                 try {
                   await post('/contacts', { name, email });
                   setName('');
@@ -2854,6 +3104,8 @@ function Family(props: Props & { onSimple: () => void }) {
                   load();
                 } catch (e) {
                   props.notify((e as Error).message);
+                } finally {
+                  setAdding(false);
                 }
               }}
             >
@@ -2864,6 +3116,7 @@ function Family(props: Props & { onSimple: () => void }) {
                   required
                   minLength={2}
                   maxLength={80}
+                  disabled={adding}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
@@ -2873,6 +3126,8 @@ function Family(props: Props & { onSimple: () => void }) {
                 <input
                   type="email"
                   required
+                  disabled={adding}
+                  maxLength={254}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
@@ -2881,10 +3136,11 @@ function Family(props: Props & { onSimple: () => void }) {
                 Only add someone who agrees to receive your security alerts. Adding a contact does
                 not send an email.
               </p>
-              <Button type="submit">
+              <Button type="submit" disabled={adding}>
                 <Plus size={16} />
-                Add contact
+                {adding ? 'Adding…' : 'Add contact'}
               </Button>
+              {contactsResource.loading && <p role="status">Loading contacts…</p>}
               {contacts.map((c) => (
                 <div className="contact-row" key={c.id}>
                   <span className="avatar">{c.name[0]}</span>
@@ -2896,12 +3152,23 @@ function Family(props: Props & { onSimple: () => void }) {
                     type="button"
                     className="icon-button"
                     aria-label={'Remove ' + c.name}
+                    disabled={
+                      Boolean(removing) ||
+                      sending ||
+                      contactsResource.loading ||
+                      Boolean(contactsResource.error)
+                    }
                     onClick={async () => {
+                      if (removing || sending) return;
+                      setRemoving(c.id);
                       try {
                         await api('/contacts/' + c.id, { method: 'DELETE' });
+                        if (contactId === c.id) setContactId('');
                         load();
                       } catch (e) {
                         props.notify((e as Error).message);
+                      } finally {
+                        setRemoving(null);
                       }
                     }}
                   >
@@ -2912,21 +3179,32 @@ function Family(props: Props & { onSimple: () => void }) {
             </form>
             <form
               className="card stack"
+              aria-busy={sending}
               onSubmit={async (e) => {
                 e.preventDefault();
+                if (sending || !canSend) return;
+                setSending(true);
                 try {
                   await post('/alerts', { scanId, contactId });
                   props.notify('Security alert sent.');
                   load();
                 } catch (e) {
                   props.notify((e as Error).message);
+                  alertsResource.reload();
+                } finally {
+                  setSending(false);
                 }
               }}
             >
               <h2>Send a security alert</h2>
               <label>
                 Saved scan
-                <select required value={scanId} onChange={(e) => setScanId(e.target.value)}>
+                <select
+                  required
+                  value={scanId}
+                  disabled={sending || scansResource.loading || Boolean(scansResource.error)}
+                  onChange={(e) => setScanId(e.target.value)}
+                >
                   <option value="">Choose a scan</option>
                   {scans.map((s) => (
                     <option value={s.id} key={s.id}>
@@ -2937,7 +3215,17 @@ function Family(props: Props & { onSimple: () => void }) {
               </label>
               <label>
                 Trusted contact
-                <select required value={contactId} onChange={(e) => setContactId(e.target.value)}>
+                <select
+                  required
+                  value={contactId}
+                  disabled={
+                    sending ||
+                    Boolean(removing) ||
+                    contactsResource.loading ||
+                    Boolean(contactsResource.error)
+                  }
+                  onChange={(e) => setContactId(e.target.value)}
+                >
                   <option value="">Choose a contact</option>
                   {contacts.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -2950,12 +3238,22 @@ function Family(props: Props & { onSimple: () => void }) {
                 Sends the risk level and safety advice. Your submitted message and suspicious link
                 are not included. Verified email is required.
               </p>
-              <Button type="submit">
+              {!props.user.verified && (
+                <p className="small-print">Verify your email in Settings before sending alerts.</p>
+              )}
+              {!props.health?.email && (
+                <p className="small-print">Email delivery is not configured in this workspace.</p>
+              )}
+              <Button type="submit" disabled={sending || !canSend}>
                 <Mail size={16} />
-                Send security alert
+                {sending ? 'Sending…' : 'Send security alert'}
               </Button>
               <h3>Alert history</h3>
-              {alerts.length ? (
+              {alertsResource.loading ? (
+                <p role="status">Loading alerts…</p>
+              ) : alertsResource.error ? (
+                <p>Alerts could not be loaded.</p>
+              ) : alerts.length ? (
                 alerts
                   .slice(-10)
                   .reverse()
@@ -2975,8 +3273,9 @@ function Family(props: Props & { onSimple: () => void }) {
     </>
   );
 }
-function SettingsPage(props: Props & { health: any; setUser: (u: User | null) => void }) {
+function SettingsPage(props: Props & { health: any; setUser: (u: User | null) => boolean }) {
   const [name, setName] = useState(props.user?.name || '');
+  const [pending, setPending] = useState<'profile' | 'verify' | 'logout' | null>(null);
   return (
     <>
       <PageTitle
@@ -2992,13 +3291,17 @@ function SettingsPage(props: Props & { health: any; setUser: (u: User | null) =>
             className="card stack"
             onSubmit={async (e) => {
               e.preventDefault();
+              if (pending) return;
+              setPending('profile');
               try {
-                props.setUser(
+                const updated = props.setUser(
                   await api('/me', { method: 'PATCH', body: JSON.stringify({ name }) }),
                 );
-                props.notify('Profile updated.');
+                if (updated) props.notify('Profile updated.');
               } catch (e) {
                 props.notify((e as Error).message);
+              } finally {
+                setPending(null);
               }
             }}
           >
@@ -3007,6 +3310,7 @@ function SettingsPage(props: Props & { health: any; setUser: (u: User | null) =>
               Name
               <input
                 value={name}
+                disabled={Boolean(pending)}
                 onChange={(e) => setName(e.target.value)}
                 minLength={2}
                 maxLength={80}
@@ -3022,28 +3326,44 @@ function SettingsPage(props: Props & { health: any; setUser: (u: User | null) =>
               <Button
                 type="button"
                 variant="outline"
+                disabled={Boolean(pending) || !props.health?.email}
                 onClick={async () => {
+                  setPending('verify');
                   try {
                     await post('/auth/resend', {});
                     props.notify('Verification email sent.');
                   } catch (e) {
                     props.notify((e as Error).message);
+                  } finally {
+                    setPending(null);
                   }
                 }}
               >
                 Resend verification
               </Button>
             )}
-            <Button type="submit">Save profile</Button>
+            {!props.health?.email && (
+              <p className="small-print">
+                Email delivery is not configured. Verification and password-reset emails cannot be
+                sent yet.
+              </p>
+            )}
+            <Button type="submit" disabled={Boolean(pending)}>
+              {pending === 'profile' ? 'Saving…' : 'Save profile'}
+            </Button>
             <Button
               type="button"
               variant="ghost"
+              disabled={Boolean(pending)}
               onClick={async () => {
+                setPending('logout');
                 try {
                   await post('/auth/logout', {});
                   props.setUser(null);
                 } catch (e) {
                   props.notify((e as Error).message);
+                } finally {
+                  setPending(null);
                 }
               }}
             >
@@ -3096,17 +3416,17 @@ function SettingsPage(props: Props & { health: any; setUser: (u: User | null) =>
 }
 function Admin(props: Props) {
   const [tab, setTab] = useState('reports'),
-    [rows, setRows] = useState<any[]>([]),
     [name, setName] = useState(''),
     [aliases, setAliases] = useState(''),
-    [domains, setDomains] = useState('');
-  const load = () =>
-    api('/admin/' + tab)
-      .then(setRows)
-      .catch((e) => props.notify(e.message));
-  useEffect(() => {
-    if (props.user?.role === 'admin') load();
-  }, [tab, props.user]);
+    [domains, setDomains] = useState(''),
+    [busy, setBusy] = useState(false);
+  const {
+    data,
+    loading,
+    error,
+    reload: load,
+  } = useApiResource<any[]>('/admin/' + tab, props.user?.role === 'admin');
+  const rows = data || [];
   if (props.user?.role !== 'admin')
     return (
       <Empty
@@ -3121,129 +3441,227 @@ function Admin(props: Props) {
         title="Review the evidence."
         text="Moderate reports and manage configured brand domains. Administrative changes are logged."
       />
-      <div className="admin-tabs">
+      <div className="admin-tabs" role="group" aria-label="Administration views">
         {['reports', 'users', 'brands', 'threatCategories', 'scans', 'adminLogs'].map((t) => (
-          <Button key={t} variant={t === tab ? 'default' : 'outline'} onClick={() => setTab(t)}>
-            {t}
+          <Button
+            key={t}
+            variant={t === tab ? 'default' : 'outline'}
+            onClick={() => {
+              setTab(t);
+              setName('');
+              setAliases('');
+              setDomains('');
+            }}
+            disabled={busy}
+            aria-pressed={tab === t}
+          >
+            {
+              {
+                reports: 'Reports',
+                users: 'Users',
+                brands: 'Brands',
+                threatCategories: 'Threat categories',
+                scans: 'Scans',
+                adminLogs: 'Activity log',
+              }[t]
+            }
           </Button>
         ))}
       </div>
       {tab === 'brands' && (
         <form
           className="card stack"
+          aria-busy={busy}
           onSubmit={async (e) => {
             e.preventDefault();
+            if (busy) return;
+            setBusy(true);
             try {
               await post('/admin/brands', {
                 name,
-                aliases: aliases.split(',').map((s) => s.trim()),
-                domains: domains.split(',').map((s) => s.trim()),
+                aliases: aliases
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+                domains: domains
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean),
               });
               load();
               props.notify('Brand configuration saved.');
             } catch (e) {
               props.notify((e as Error).message);
+            } finally {
+              setBusy(false);
             }
           }}
         >
           <h3>Add or replace a brand</h3>
           <label>
             Name
-            <input required value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              required
+              minLength={2}
+              maxLength={80}
+              disabled={busy}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </label>
           <label>
             Aliases, comma separated
-            <input required value={aliases} onChange={(e) => setAliases(e.target.value)} />
+            <input
+              required
+              maxLength={1219}
+              disabled={busy}
+              value={aliases}
+              onChange={(e) => setAliases(e.target.value)}
+            />
           </label>
           <label>
             Official domains, comma separated
-            <input required value={domains} onChange={(e) => setDomains(e.target.value)} />
+            <input
+              required
+              maxLength={5079}
+              disabled={busy}
+              value={domains}
+              onChange={(e) => setDomains(e.target.value)}
+            />
           </label>
-          <Button type="submit">Save brand</Button>
+          <Button type="submit" disabled={busy}>
+            {busy ? 'Saving…' : 'Save brand'}
+          </Button>
         </form>
       )}
       {tab === 'threatCategories' && (
         <form
           className="card stack"
+          aria-busy={busy}
           onSubmit={async (e) => {
             e.preventDefault();
+            if (busy) return;
+            setBusy(true);
             try {
               await post('/admin/threatCategories', { name });
+              setName('');
               load();
+              props.notify('Threat category added.');
             } catch (e) {
               props.notify((e as Error).message);
+            } finally {
+              setBusy(false);
             }
           }}
         >
           <label>
             Category name
-            <input required value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              required
+              minLength={2}
+              maxLength={80}
+              disabled={busy}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </label>
-          <Button>Add category</Button>
+          <Button type="submit" disabled={busy}>
+            {busy ? 'Saving…' : 'Add category'}
+          </Button>
         </form>
       )}
       <div className="card">
-        {!rows.length && <p>No records to review.</p>}
-        {rows.map((r) => (
-          <div className="admin-row" key={r.id}>
-            <div>
-              <strong>
-                {r.entity || r.name || r.email || r.action || r.result?.preview || r.id}
-              </strong>
-              <p>
-                {r.description ||
-                  r.category ||
-                  r.target ||
-                  r.domains?.join(', ') ||
-                  r.email ||
-                  r.level}
-              </p>
-              <small>{r.status || r.role || new Date(r.createdAt).toLocaleString()}</small>
-            </div>
-            {tab === 'reports' && (
+        {loading && <p role="status">Loading records…</p>}
+        {error && (
+          <p className="error" role="alert">
+            {error}{' '}
+            <Button variant="outline" onClick={load}>
+              Try again
+            </Button>
+          </p>
+        )}
+        {!loading && !error && !rows.length && <p>No records to review.</p>}
+        {!loading &&
+          !error &&
+          rows.map((r) => (
+            <div className="admin-row" key={r.id}>
               <div>
-                {['approved', 'rejected', 'pending'].map((status) => (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    key={status}
-                    onClick={async () => {
-                      try {
-                        await api('/admin/reports/' + r.id, {
-                          method: 'PATCH',
-                          body: JSON.stringify({ status }),
-                        });
-                        load();
-                      } catch (e) {
-                        props.notify((e as Error).message);
-                      }
-                    }}
-                  >
-                    {status}
-                  </Button>
-                ))}
+                <strong>
+                  {r.entity || r.name || r.email || r.action || r.result?.preview || r.id}
+                </strong>
+                <p>
+                  {r.description ||
+                    r.category ||
+                    r.target ||
+                    r.domains?.join(', ') ||
+                    r.email ||
+                    r.level}
+                </p>
+                <small>
+                  {r.status ||
+                    (r.role
+                      ? `${r.role}${r.disabled ? ' · Disabled' : ''}`
+                      : r.createdAt
+                        ? new Date(r.createdAt).toLocaleString()
+                        : 'Configured')}
+                </small>
               </div>
-            )}
-            {tab === 'users' && r.id !== props.user!.id && (
-              <Button
-                variant="outline"
-                onClick={async () => {
-                  try {
-                    await api('/admin/users/' + r.id, {
-                      method: 'PATCH',
-                      body: JSON.stringify({ disabled: !r.disabled }),
-                    });
-                    load();
-                  } catch (e) {
-                    props.notify((e as Error).message);
-                  }
-                }}
-              >
-                {r.disabled ? 'Enable' : 'Disable'}
-              </Button>
-            )}
-          </div>
-        ))}
+              {tab === 'reports' && (
+                <div>
+                  {['approved', 'rejected', 'pending'].map((status) => (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      key={status}
+                      disabled={busy || r.status === status}
+                      onClick={async () => {
+                        if (busy) return;
+                        setBusy(true);
+                        try {
+                          await api('/admin/reports/' + r.id, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ status }),
+                          });
+                          load();
+                          props.notify(`Report ${status}.`);
+                        } catch (e) {
+                          props.notify((e as Error).message);
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      {status}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {tab === 'users' && r.id !== props.user!.id && (
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (busy) return;
+                    setBusy(true);
+                    try {
+                      await api('/admin/users/' + r.id, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ disabled: !r.disabled }),
+                      });
+                      load();
+                      props.notify(r.disabled ? 'Account enabled.' : 'Account disabled.');
+                    } catch (e) {
+                      props.notify((e as Error).message);
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {r.disabled ? 'Enable' : 'Disable'}
+                </Button>
+              )}
+            </div>
+          ))}
       </div>
     </>
   );
@@ -3258,15 +3676,22 @@ function AuthModal({
   notify: (s: string) => void;
 }) {
   const [showPassword, setShowPassword] = useState(false);
-  const modalRef = useModalFocus(onClose);
   const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login'),
     [email, setEmail] = useState(''),
     [password, setPassword] = useState(''),
     [name, setName] = useState(''),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
+  const modalRef = useModalFocus(() => {
+    if (!busy) onClose();
+  });
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div
+      className="modal-backdrop"
+      onClick={() => {
+        if (!busy) onClose();
+      }}
+    >
       <section
         className="modal auth-studio"
         ref={modalRef}
@@ -3275,154 +3700,262 @@ function AuthModal({
         aria-labelledby="auth-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <button className="modal-close icon-button" aria-label="Close" onClick={onClose}>
+        <button
+          className="modal-close icon-button"
+          aria-label="Close"
+          onClick={onClose}
+          disabled={busy}
+        >
           <X />
         </button>
         <aside className="auth-story">
-          <div className="auth-wordmark"><ShieldCheck size={25}/> SafeLink <small>AI</small></div>
-          <div className="auth-orb"><div><ShieldCheck size={58}/></div><span className="auth-orbit-label">A SECOND LOOK MATTERS</span></div>
+          <div className="auth-wordmark">
+            <ShieldCheck size={25} /> SafeLink <small>AI</small>
+          </div>
+          <div className="auth-orb">
+            <div>
+              <ShieldCheck size={58} />
+            </div>
+            <span className="auth-orbit-label">A SECOND LOOK MATTERS</span>
+          </div>
           <span className="auth-eyebrow">YOUR PERSONAL SAFETY SPACE</span>
-          <h2>A calmer corner<br/>of the internet.</h2>
-          <p>Keep your checks together.<br/>Make your next click a thoughtful one.</p>
-          <div className="auth-benefits"><span><Check size={15}/> Your scan history, in one place</span><span><Check size={15}/> Community signals & Family Shield</span></div>
+          <h2>
+            A calmer corner
+            <br />
+            of the internet.
+          </h2>
+          <p>
+            Keep your checks together.
+            <br />
+            Make your next click a thoughtful one.
+          </p>
+          <div className="auth-benefits">
+            <span>
+              <Check size={15} /> Your scan history, in one place
+            </span>
+            <span>
+              <Check size={15} /> Community signals & Family Shield
+            </span>
+          </div>
           <small className="auth-story-foot">PAUSE. CHECK. PROCEED THOUGHTFULLY.</small>
         </aside>
         <div className="auth-form-panel">
-        <div className="auth-mode-switch" aria-label="Account options">
-          <button type="button" disabled={busy} aria-pressed={mode==='login'} onClick={()=>{setMode('login');setError('');setShowPassword(false);}}>Sign in</button>
-          <button type="button" disabled={busy} aria-pressed={mode==='register'} onClick={()=>{setMode('register');setError('');setShowPassword(false);}}>Create account</button>
-        </div>
-        <span className="brand-mark auth-mobile-mark">
-          <ShieldCheck />
-        </span>
-        <h2 id="auth-title">
-          {mode === 'register'
-            ? 'Make yourself at home.'
-            : mode === 'forgot'
-              ? 'Reset your password'
-              : 'Welcome back.'}
-        </h2>
-        <p>
-          {mode === 'register'
-            ? 'Save scans, report threats and protect your family.'
-            : 'Your next safer click starts here.'}
-        </p>
-        <form aria-busy={busy}
-          className="stack"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setBusy(true);
-            setError('');
-            try {
-              const data = await post('/auth/' + mode, {
-                email,
-                password,
-                ...(mode === 'register' ? { name } : {}),
-              });
-              if (mode === 'forgot') {
-                notify(data.message);
-                onClose();
-              } else {
-                onUser(data.user);
-                if (mode === 'register')
-                  notify(
-                    data.emailSent
-                      ? 'Account created. Check your verification email.'
-                      : 'Account created. Email service is not configured; verification is pending.',
-                  );
-              }
-            } catch (e) {
-              setError((e as Error).message);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {mode === 'register' && (
-            <label>
-              Name
-              <input
-                placeholder="Your name"
-                autoComplete="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                minLength={2}
-                maxLength={80}
-              />
-            </label>
-          )}
-          <label>
-            Email
-            <input
-              placeholder="you@example.com"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </label>
-          {mode !== 'forgot' && (
-            <div className="auth-password-field">
-              <label htmlFor="auth-password">Password</label>
-              <div className="auth-password-wrap"><input
-                id="auth-password"
-                placeholder={mode === 'register' ? 'Create a memorable passphrase' : 'Enter your password'}
-                type={showPassword ? 'text' : 'password'}
-                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={mode === 'register' ? 12 : 1}
-                maxLength={128}
-              />
-              <button type="button" aria-label={showPassword?'Hide password':'Show password'} aria-pressed={showPassword} onClick={()=>setShowPassword(!showPassword)}>{showPassword?'Hide':'Show'}</button></div>
-              {mode === 'register' && <div className="auth-password-hint"><span className={password.length>=12?'ready':''}/><small>{password.length>=12?'Length requirement met':'Use at least 12 characters. A few unrelated words work well.'}</small></div>}
-            </div>
-          )}
-          {error && (
-            <p className="error" role="alert">
-              {error}
-            </p>
-          )}
-          <Button type="submit" disabled={busy}>
-            {busy
-              ? 'Please wait…'
-              : mode === 'register'
-                ? 'Create account'
-                : mode === 'forgot'
-                  ? 'Send reset link'
-                  : 'Sign in'}
-            <ArrowRight size={16} />
-          </Button>
-        </form>
-        <div className="auth-links">
-          <button
-            onClick={() => {
-              setMode(mode === 'register' || mode === 'forgot' ? 'login' : 'register');
-              setShowPassword(false);
+          <div className="auth-mode-switch" aria-label="Account options">
+            <button
+              type="button"
+              disabled={busy}
+              aria-pressed={mode === 'login'}
+              onClick={() => {
+                setMode('login');
+                setError('');
+                setShowPassword(false);
+              }}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              aria-pressed={mode === 'register'}
+              onClick={() => {
+                setMode('register');
+                setError('');
+                setShowPassword(false);
+              }}
+            >
+              Create account
+            </button>
+          </div>
+          <span className="brand-mark auth-mobile-mark">
+            <ShieldCheck />
+          </span>
+          <h2 id="auth-title">
+            {mode === 'register'
+              ? 'Make yourself at home.'
+              : mode === 'forgot'
+                ? 'Reset your password'
+                : 'Welcome back.'}
+          </h2>
+          <p>
+            {mode === 'register'
+              ? 'Save scans, report threats and protect your family.'
+              : 'Your next safer click starts here.'}
+          </p>
+          <form
+            aria-busy={busy}
+            className="stack"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (busy) return;
+              setBusy(true);
               setError('');
+              try {
+                const data = await post('/auth/' + mode, {
+                  email,
+                  password,
+                  ...(mode === 'register' ? { name } : {}),
+                });
+                if (mode === 'forgot') {
+                  notify(data.message);
+                  onClose();
+                } else {
+                  onUser(data.user);
+                  if (mode === 'register')
+                    notify(
+                      data.emailSent
+                        ? 'Account created. Check your verification email.'
+                        : 'Account created. A verification email could not be sent; verification is pending.',
+                    );
+                }
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
             }}
           >
-            {mode === 'register' || mode === 'forgot'
-              ? 'Back to sign in'
-              : 'New here? Create an account'}
+            {mode === 'register' && (
+              <label>
+                Name
+                <input
+                  placeholder="Your name"
+                  autoComplete="name"
+                  disabled={busy}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  minLength={2}
+                  maxLength={80}
+                />
+              </label>
+            )}
+            <label>
+              Email
+              <input
+                placeholder="you@example.com"
+                type="email"
+                autoComplete="email"
+                disabled={busy}
+                maxLength={254}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </label>
+            {mode !== 'forgot' && (
+              <div className="auth-password-field">
+                <label htmlFor="auth-password">Password</label>
+                <div className="auth-password-wrap">
+                  <input
+                    id="auth-password"
+                    disabled={busy}
+                    placeholder={
+                      mode === 'register' ? 'Create a memorable passphrase' : 'Enter your password'
+                    }
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={mode === 'register' ? 12 : 1}
+                    maxLength={128}
+                  />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPassword}
+                    disabled={busy}
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                {mode === 'register' && (
+                  <div className="auth-password-hint">
+                    <span className={password.length >= 12 ? 'ready' : ''} />
+                    <small>
+                      {password.length >= 12
+                        ? 'Length requirement met'
+                        : 'Use at least 12 characters. A few unrelated words work well.'}
+                    </small>
+                  </div>
+                )}
+              </div>
+            )}
+            {error && (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            )}
+            <Button type="submit" disabled={busy}>
+              {busy
+                ? 'Please wait…'
+                : mode === 'register'
+                  ? 'Create account'
+                  : mode === 'forgot'
+                    ? 'Send reset link'
+                    : 'Sign in'}
+              <ArrowRight size={16} />
+            </Button>
+          </form>
+          <div className="auth-links">
+            <button
+              disabled={busy}
+              onClick={() => {
+                setMode(mode === 'register' || mode === 'forgot' ? 'login' : 'register');
+                setShowPassword(false);
+                setError('');
+              }}
+            >
+              {mode === 'register' || mode === 'forgot'
+                ? 'Back to sign in'
+                : 'New here? Create an account'}
+            </button>
+            {mode === 'login' && (
+              <button
+                disabled={busy}
+                onClick={() => {
+                  setMode('forgot');
+                  setError('');
+                  setShowPassword(false);
+                }}
+              >
+                Forgot password?
+              </button>
+            )}
+          </div>
+          <div className="auth-footer-note">
+            <ShieldCheck size={14} />
+            <span>You can also explore the scanner without an account.</span>
+          </div>
+          <button className="auth-guest" type="button" onClick={onClose} disabled={busy}>
+            Continue as guest <ArrowUpRight size={14} />
           </button>
-          {mode === 'login' && <button onClick={() => {setMode('forgot');setError('');setShowPassword(false);}}>Forgot password?</button>}
-        </div>
-        <div className="auth-footer-note"><ShieldCheck size={14}/><span>You can also explore the scanner without an account.</span></div>
-        <button className="auth-guest" type="button" onClick={onClose}>Continue as guest <ArrowUpRight size={14}/></button>
         </div>
       </section>
     </div>
   );
 }
-function AccountAction({ action, notify }: { action: string; notify: (s: string) => void }) {
+function AccountAction({
+  action,
+  notify,
+  onConfirmed,
+}: {
+  action: string;
+  notify: (s: string) => void;
+  onConfirmed: () => void;
+}) {
   const [closed, setClosed] = useState(false),
     [password, setPassword] = useState(''),
+    [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
-  const modalRef = useModalFocus(() => setClosed(true), !closed);
+  const [token] = useState(() => new URLSearchParams(location.search).get('token'));
+  const close = () => {
+    if (busy) return;
+    history.replaceState({}, '', location.pathname + '#workspace');
+    setClosed(true);
+  };
+  const modalRef = useModalFocus(close, !closed);
   if (closed) return null;
   return (
     <div className="modal-backdrop">
@@ -3434,26 +3967,39 @@ function AccountAction({ action, notify }: { action: string; notify: (s: string)
         aria-label="Confirm account action"
       >
         <h2>{action === 'reset' ? 'Choose a new password' : 'Verify your email'}</h2>
+        {!token && (
+          <p className="error" role="alert">
+            This link has no confirmation token. Open the complete link from your email.
+          </p>
+        )}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
         <form
           className="stack"
           onSubmit={async (e) => {
             e.preventDefault();
+            if (busy || !token) return;
+            setError('');
             setBusy(true);
             try {
               await post('/auth/confirm', {
                 purpose: action,
-                token: new URLSearchParams(location.search).get('token'),
+                token,
                 ...(action === 'reset' ? { password } : {}),
               });
-              history.replaceState({}, '', location.pathname);
+              history.replaceState({}, '', location.pathname + '#workspace');
               setClosed(true);
+              onConfirmed();
               notify(
                 action === 'reset'
                   ? 'Password reset. Sign in with your new password.'
-                  : 'Email verified. Refresh to update your account.',
+                  : 'Email verified. Your account has been updated.',
               );
             } catch (e) {
-              notify((e as Error).message);
+              setError((e as Error).message);
             } finally {
               setBusy(false);
             }
@@ -3464,6 +4010,8 @@ function AccountAction({ action, notify }: { action: string; notify: (s: string)
               New password
               <input
                 type="password"
+                autoComplete="new-password"
+                disabled={busy}
                 required
                 minLength={12}
                 maxLength={128}
@@ -3472,15 +4020,8 @@ function AccountAction({ action, notify }: { action: string; notify: (s: string)
               />
             </label>
           )}
-          <Button disabled={busy}>Confirm</Button>
-          <Button
-            variant="ghost"
-            type="button"
-            onClick={() => {
-              history.replaceState({}, '', location.pathname);
-              setClosed(true);
-            }}
-          >
+          <Button disabled={busy || !token}>{busy ? 'Confirming…' : 'Confirm'}</Button>
+          <Button variant="ghost" type="button" disabled={busy} onClick={close}>
             Close
           </Button>
         </form>

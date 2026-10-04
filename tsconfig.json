@@ -12,5 +12,5 @@
     "noEmit": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["web", "server", "shared", "tests", "vite.config.ts", "drizzle.config.ts"]
+  "include": ["web", "server", "shared", "tests", "scripts", "vite.config.ts", "drizzle.config.ts"]
 }

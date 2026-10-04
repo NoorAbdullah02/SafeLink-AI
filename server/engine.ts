@@ -5,6 +5,7 @@ import { parse } from 'tldts';
 import type { Brand, Evidence, ScanKind, ScanResult } from '../shared/types.js';
 import { defaultBrands } from './brands.js';
 import { InputError } from './errors.js';
+export const credentialRequestDetail = 'The message asks for an OTP, PIN or password.';
 export function normalizeUrl(input: string): URL {
   const s = input.trim();
   if (!s || /[\s\u0000-\u001f]/u.test(s)) throw new InputError('Enter a valid URL without spaces.');
@@ -57,7 +58,7 @@ export function skeleton(s: string) {
 export function extractUrls(text: string): string[] {
   const matches =
     text.match(
-      /(?:https?:\/\/|www\.)[^\s<>"\u0964]+|\b(?:[a-z0-9-]+\.)+(?:com|net|org|info|xyz|top|bd|example|test)(?:\/[^\s<>"\u0964]*)?/gi,
+      /(?:https?:\/\/|www\.)[^\s<>"\u0964]+|(?<![@\p{L}\p{N}_-])(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+(?:[\p{L}]{2,63}|xn--[a-z0-9-]+)(?::\d{1,5})?(?:[/?#][^\s<>"\u0964]*)?/giu,
     ) || [];
   return [...new Set(matches.map((s) => s.replace(/[.,!?;:।)\]}]+$/u, '')))].slice(0, 10);
 }
@@ -70,7 +71,7 @@ export function normalizePhone(s: string) {
 export function extractPhones(s: string): string[] {
   return [
     ...new Set(
-      (s.match(/(?:\+?88)?[০0][১1][০-৯0-9\s-]{9,14}/g) || [])
+      (s.match(/(?:\+?[৮8][৮8])?[০0][১1](?:[ -]*[০-৯0-9]){9}(?![০-৯0-9])/g) || [])
         .map(normalizePhone)
         .filter((n) => /^\+8801\d{9}$/.test(n)),
     ),
@@ -204,17 +205,17 @@ export function localScan(
   }
   if (kind !== 'url') {
     const lower = text.toLowerCase();
-    const credentialRequest = lower.split(/[.!?।\n]+|\b(?:but|however)\b/iu).some(sentence => {
+    const credentialRequest = lower.split(/[.!?।\n,]+|\b(?:and|but|however)\b|কিন্তু|তবে/iu).some(sentence => {
       const sensitive = /\b(?:otp|pin|password|passcode)\b|ওটিপি|পিন|পাসওয়ার্ড|পাসওয়ার্ড/iu.test(sentence);
       const request = /\b(?:send|share|provide|enter|submit|tell|din|den|pathan|janan)\b|দেন|দিন|পাঠান|জানান|লিখুন/iu.test(sentence);
-      const negated = /\b(?:never|do not|don't|dont|share korben na|diben na)\b|কখনো|কখনও|দিবেন না|দেবেন না|শেয়ার করবেন না/iu.test(sentence);
+      const negated = /\b(?:never|do not|don't|dont)\s+(?:(?:ever|please)\s+)?(?:send|share|provide|enter|submit|tell)\b|\b(?:share korben na|diben na)\b|(?:ওটিপি|পিন|পাসওয়ার্ড|পাসওয়ার্ড).*?(?:দিন না|দেন না|দিবেন না|দেবেন না|শেয়ার করবেন না|শেয়ার করবেন না)|(?:কখনো|কখনও).*?(?:দিন না|দেন না|দিবেন না|দেবেন না|শেয়ার করবেন না|শেয়ার করবেন না)/iu.test(sentence);
       return sensitive && request && !negated;
     });
     if (credentialRequest)
       add(
         'credentials',
         'Sensitive information requested',
-        'The message asks for an OTP, PIN or password.',
+        credentialRequestDetail,
         35,
       );
     if (/urgent|immediately|ekhoni|taratari|এখনই|জরুরি|দ্রুত/i.test(lower))
@@ -302,7 +303,7 @@ export function finish(r: ScanResult): ScanResult {
           ? 'Caution'
           : 'Low Risk';
   r.threatType = r.evidence.some((e) => e.id === 'credentials')
-    ? 'Credential theft'
+    ? 'Credential request indicators'
     : r.evidence.some((e) => e.id.startsWith('brand:'))
       ? 'Possible impersonation'
       : r.evidence.some((e) => e.id === 'prize')
