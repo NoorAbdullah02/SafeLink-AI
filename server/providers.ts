@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ScanResult } from '../shared/types.js';
-import { finish, redactUrl } from './engine.js';
+import { finish, normalizeUrl } from './engine.js';
+import { sanitizeExternalText } from './privacy.js';
 const aiSchema = z.object({
   explanation: z.string().min(1).max(1500),
   semanticRisk: z.number().int().min(0).max(20),
@@ -8,23 +9,39 @@ const aiSchema = z.object({
 export interface AIProvider {
   analyze(text: string, result: ScanResult): Promise<z.infer<typeof aiSchema>>;
 }
+export function aiSettings() {
+  const mistralKey = process.env.MISTRAL_KEY || process.env.MISTRIAL_KEY;
+  const useMistral = !process.env.LLM_API_KEY && Boolean(mistralKey);
+  const apiKey = process.env.LLM_API_KEY || mistralKey;
+  if (!apiKey) return undefined;
+  try {
+    const base = new URL(process.env.LLM_BASE_URL || (useMistral ? 'https://api.mistral.ai/v1' : 'https://api.openai.com/v1'));
+    if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) return undefined;
+    return {
+      apiKey,
+      model: process.env.LLM_MODEL || (useMistral ? 'mistral-small-latest' : 'gpt-4o-mini'),
+      endpoint: base.href.replace(/\/$/, '') + '/chat/completions',
+    };
+  } catch {
+    return undefined;
+  }
+}
 export class CompatibleAI implements AIProvider {
   async analyze(text: string, result: ScanResult) {
-    const mistralKey = process.env.MISTRAL_KEY || process.env.MISTRIAL_KEY;
-    const base = process.env.LLM_BASE_URL || (mistralKey ? 'https://api.mistral.ai/v1' : 'https://api.openai.com/v1');
-    const apiKey = process.env.LLM_API_KEY || mistralKey;
-    const model = process.env.LLM_MODEL || (mistralKey ? 'mistral-small-latest' : 'gpt-4o-mini');
-    if (!base.startsWith('https://')) throw new Error('Provider must use HTTPS');
-    const response = await fetch(base.replace(/\/$/, '') + '/chat/completions', {
+    const settings = aiSettings();
+    if (!settings) throw new Error('AI provider is not configured securely');
+    const response = await fetch(settings.endpoint, {
       method: 'POST',
+      redirect: 'error',
       signal: AbortSignal.timeout(10000),
       headers: {
         'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + apiKey,
+        Authorization: 'Bearer ' + settings.apiKey,
       },
       body: JSON.stringify({
-        model,
+        model: settings.model,
         temperature: 0,
+        max_tokens: 600,
         response_format: { type: 'json_object' },
         messages: [
           {
@@ -73,6 +90,7 @@ export async function enrich(
           encodeURIComponent(process.env.SAFE_BROWSING_API_KEY),
         {
           method: 'POST',
+          redirect: 'error',
           signal: AbortSignal.timeout(7000),
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -90,10 +108,13 @@ export async function enrich(
       const data = z
         .object({
           matches: z
-            .array(z.object({ threatType: z.string(), threat: z.object({ url: z.string() }) }))
+            .array(z.object({ threatType: z.enum(['MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE']), threat: z.object({ url: z.string() }) }))
             .optional(),
         })
         .parse(await response.json());
+      const requested = new Set(r.urls.map((url) => normalizeUrl(url).href));
+      if (data.matches?.some((match) => !requested.has(normalizeUrl(match.threat.url).href)))
+        throw new Error('Threat service returned a match for an unrequested URL.');
       if (data.matches?.length) {
         r.evidence.push({
           id: 'google-threat',
@@ -103,7 +124,7 @@ export async function enrich(
             'Google Safe Browsing returned ' +
             [...new Set(data.matches.map((m) => m.threatType))].join(', ') +
             '.',
-          weight: 80,
+          weight: Math.max(0, 80 - r.score),
         });
         r.score = Math.max(80, r.score);
       }
@@ -121,8 +142,7 @@ export async function enrich(
         detail: 'Provider failed or timed out. Local results remain available.',
       });
     }
-  const mistralConfigured = Boolean(process.env.MISTRAL_KEY || process.env.MISTRIAL_KEY);
-  const aiConfigured = Boolean((process.env.LLM_API_KEY && process.env.LLM_MODEL) || mistralConfigured);
+  const aiConfigured = Boolean(aiSettings());
   if (!aiConfigured)
     r.checks.push({
       name: 'AI language analysis',
@@ -131,13 +151,18 @@ export async function enrich(
     });
   else
     try {
-      const sanitized = text
-        .replace(/\b\d{4,}\b/g, '[number removed]')
-        .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email removed]')
-        .replace(/https?:\/\/\S+/g, redactUrl);
+      const sanitized = sanitizeExternalText(text);
       const a = await ai.analyze(sanitized, r);
       r.aiExplanation = a.explanation;
       r.score += a.semanticRisk;
+      if (a.semanticRisk > 0)
+        r.evidence.push({
+          id: 'ai-language',
+          source: 'ai',
+          title: 'AI language interpretation',
+          detail: 'An external language model found additional scam-language indicators. Its interpretation may be wrong.',
+          weight: a.semanticRisk,
+        });
       r.checks.push({
         name: 'AI language analysis',
         status: 'complete',

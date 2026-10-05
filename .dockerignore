@@ -7,3 +7,5 @@ mobile
 dist
 dist-server
 *.log
+coverage
+demo-assets

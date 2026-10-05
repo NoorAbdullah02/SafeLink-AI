@@ -1,163 +1,75 @@
-# SafeLink AI 🛡️
+# SafeLink AI
 
-**Before You Click, Let AI Check.**  
-*An AI-Powered, Multi-Layered Cyber Safety & Anti-Phishing Defense Platform for Bangladesh.*
+Before you click, take a second look.
 
-[![Live Web Application](https://img.shields.io/badge/Live%20Web%20App-Render-46E3B7?style=for-the-badge&logo=render&logoColor=black)](https://safelink-ai-8q6c.onrender.com)
-[![Download Android APK](https://img.shields.io/badge/Download%20APK-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/NoorAbdullah02/SafeLink-AI/releases/download/v1.0.0/app-debug.apk)
-[![Tests Passing](https://img.shields.io/badge/Automated%20Tests-29%2F29%20Passing-success?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/NoorAbdullah02/SafeLink-AI/actions)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
+SafeLink checks URLs, Bangla/Banglish/English messages, QR images and screenshots for scam indicators. The React website and Flutter app use the same Express backend. Results show evidence, a 0–100 risk indicator and which checks actually ran. A low score does not prove safety.
 
----
+## Features and limits
 
-## 🌟 Overview & Problem Statement
+- URL structure and brand look-alike rules, credential/payment/urgency rules, QR decoding and English/Bengali OCR.
+- Account login, redacted private history, saved scans, community reports and administrator moderation.
+- Trusted contacts and explicitly requested email alerts when email services and account verification are available.
+- Optional external language-model and Google Safe Browsing checks, requiring user opt-in. The safety assistant uses curated guidance by default and separately offers external AI.
+- Responsive website and Flutter camera, gallery and Android shared-text integration in source.
 
-In Bangladesh, Mobile Financial Services (MFS) like **bKash, Nagad, and Rocket** have empowered millions, but have also opened the floodgates to digital financial fraud:
-- **Typo-squatting and Homograph attacks:** Spoofed domains such as `bkash-reward.xyz` or Unicode look-alike characters deceiving uninitiated users.
-- **Social Engineering in Banglish / Regional Bangla:** Fake lottery claims, urgent threats (*"Apnar account ekhoni bondho hoye jabe"*), and unauthorized OTP/PIN harvesting.
-- **Malicious QR codes & phishing screenshots:** Scams disguised as merchant pay codes or utility bills.
+Scans run on the backend. Submitted content reaches your SafeLink server even when external providers are disabled. Raw messages, screenshot text, extracted phone numbers and AI free text are excluded from saved history; stored URLs are reduced to origins. A domain itself can still be identifying, and redaction cannot recognize every secret in free text. Review content before submitting or exporting it.
 
-**SafeLink AI** provides a unified **Web + Flutter Mobile** defense system that analyzes links, messages, real QR codes, and screenshots through a 4-layered defense pipeline with privacy-first architecture.
+SafeLink does not open scanned destinations, follow redirects, block financial accounts, recover money, file police complaints or certify websites. Complaint drafts need the user's review and submission. A decoded QR cannot establish payment safety.
 
----
+## Architecture
 
-## 🚀 Live Access
+| Part            | Implementation                                                  |
+| --------------- | --------------------------------------------------------------- |
+| Website         | React, TypeScript, Vite, Tailwind, Radix UI                     |
+| Mobile          | Flutter/Dart, Mobile Scanner, Image Picker, Secure Storage      |
+| API             | Node.js, Express, Zod, session cookies and mobile bearer tokens |
+| Detection       | Rules, jsQR, Sharp, Tesseract; optional provider adapters       |
+| Persistent data | PostgreSQL/Neon, Drizzle and included migrations                |
+| Optional email  | Brevo HTTPS API                                                 |
 
-- 🌐 **Web Dashboard:** [https://safelink-ai-8q6c.onrender.com](https://safelink-ai-8q6c.onrender.com)
-- 📱 **Android App (Direct APK):** [Download Latest APK v1.0.0](https://github.com/NoorAbdullah02/SafeLink-AI/releases/download/v1.0.0/app-debug.apk)
-- 💻 **GitHub Repository:** [NoorAbdullah02/SafeLink-AI](https://github.com/NoorAbdullah02/SafeLink-AI)
+AI is configured through `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`. It adds optional interpretation; the project does not contain a trained scam classifier or measured detection accuracy. Google Safe Browsing needs its own key. Missing or failed providers appear as unavailable.
 
----
+## Local setup
 
-## 🔬 Multi-Layered Defense Pipeline (How It Works)
+Use Node.js 22.12+ and pnpm 10+. Run `pnpm install --frozen-lockfile`, copy `.env.example` to `.env`, then run `pnpm dev`. Open `http://localhost:5173`. Windows users can use `scripts/start-local.ps1`. The development proxy expects API port 3001.
 
-SafeLink AI does not simply query a single black-box model. It employs a **4-Layer Defense Pipeline**:
+The example configuration explicitly uses `DEMO_MEMORY=true`: accounts/history reset on restart. For persistent data, configure `DATABASE_URL`, set `DEMO_MEMORY=false` and run `pnpm db:migrate`. Keep production accounts separate from testing. Optional provider keys can remain empty.
 
-```mermaid
-flowchart TD
-    A[User Input: URL / Message / QR / Screenshot] --> B[Input Normalization & Extraction]
-    B -->|Tesseract OCR / QR Decoder / RegEx| C[Extracted Text, Domains & Phone Numbers]
-    
-    C --> D[Layer 1: Deterministic Heuristic Engine]
-    D -->|Homograph & Levenshtein Checks| D1[Brand Impersonation Detection]
-    D -->|Bangla/Banglish Keyword NLP| D2[Credential & Urgency Trap Rules]
-    
-    C --> E[Layer 2: Neon PostgreSQL Community Intelligence]
-    E -->|Moderator-Approved Reports| E1[Crowdsourced Risk Aggregation]
-    
-    C --> F[Layer 3: Mistral AI Semantic Analysis]
-    F -->|Context-Aware LLM Inference| F1[Social Engineering & Psychological Trick Detection]
-    
-    D1 & D2 & E1 & F1 --> G[Layer 4: Risk Scoring & Advisory Matrix]
-    G --> H[Final Risk Level: Low / Caution / High / Critical]
-    G --> I[Actionable Safety Recommendations]
-```
+For screenshot demos, run `pnpm ocr:prepare` and set `OCR_LANG_PATH` to the printed directory. Container builds include OCR language files to avoid a first-use download on the demo connection.
 
-### The 4 Stages Explained:
+## Checks and builds
 
-1. **Input Normalization & Extraction:**
-   - **URL:** Normalizes domains, extracts subdomains, strips queries, catches userinfo tricks (`user@malicious.com`).
-   - **Message:** Extracts Bangladeshi phone numbers (`+8801...`) and links; normalizes Bangla Unicode (NFKC).
-   - **QR Code:** Decodes payload via `MobileScanner` / `jsqr` without opening destination.
-   - **Screenshot:** Runs dual-language OCR (**Tesseract.js** in English + Bengali).
-2. **Layer 1: Local Heuristic Rules Engine (Privacy-Preserving):**
-   - Runs client/edge-compatible deterministic checks without sending raw data to external servers.
-   - Computes **Levenshtein Distance** & skeleton normalization against trusted brand registries (bKash, Nagad, Brac Bank, etc.).
-   - Identifies credential harvesting (requests for OTP, PIN, password) and urgency pressure (*"জরুরি"*, *"immediately"*, *"account blocked"*).
-3. **Layer 2: Community Intelligence (Neon Cloud PostgreSQL):**
-   - Cross-references targets with crowdsourced scam reports verified by community moderators.
-   - Employs strict deduplication to prevent brigade abuse.
-4. **Layer 3: Mistral AI Semantic Language Analysis:**
-   - Interprets subtle contextual fraud in English, Bangla, and Banglish.
-   - Generates natural-language reasoning explaining *why* the content is dangerous.
-5. **Layer 4: Risk Scoring & Actionable Advisory (0–100):**
-   - Aggregates signals into an intuitive index:
-     - 🟢 **Low Risk (0–24):** No strong indicators found.
-     - 🟡 **Caution (25–49):** Suspicious signals present; manual verification required.
-     - 🟠 **High Risk (50–74):** Clear scam markers detected; do not proceed.
-     - 🔴 **Critical Risk (75–100):** Severe threat/phishing detected; destination blocked.
-
----
-
-## 🛠️ Technology Stack
-
-| Layer | Technology |
-|---|---|
-| **Web Client** | React 19, Vite, TypeScript, Tailwind CSS, Radix UI, Lucide Icons |
-| **Mobile Client** | Flutter 3 (Android & iOS), Dart, MobileScanner, Secure Storage |
-| **Backend API** | Node.js, Express, TypeScript, Helmet, Express-Rate-Limit, Zod |
-| **Database & ORM**| Neon Serverless PostgreSQL, Drizzle ORM |
-| **AI / Machine Learning** | Mistral AI (`mistral-small-latest`), Tesseract.js (OCR) |
-| **Email & Alerts** | Brevo (formerly Sendinblue) Transactional HTTPS API |
-| **CI / CD & Cloud** | GitHub Actions (Auto APK Releases & CI), Render Cloud Hosting |
-
----
-
-## 🎯 Competition Demo Showcase (Judges' Cheat-sheet)
-
-To test the system live during a presentation, try these scenarios:
-
-| Scenario | Input Content | Expected Detection |
-|---|---|---|
-| **bKash Typo-Squatting** | `https://bkash-reward.xyz/login` | 🔴 **Critical Risk:** Brand Impersonation, Suspicious TLD suffix |
-| **Banglish Urgency Trap** | `Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.` | 🟠 **High Risk:** Credential theft (PIN request), Psychological urgency |
-| **Bangla Prize Scam** | `অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।` | 🟠 **High Risk:** Fake prize claim, Upfront payment request |
-| **Safe Official Link** | `https://www.bkash.com` | 🟢 **Low Risk:** Official verified brand domain |
-
----
-
-## 💻 Local Development Setup
-
-### Prerequisites
-- **Node.js 22.12+** and **pnpm 10+**
-- **Flutter SDK 3.x** (for mobile development)
-
-```sh
-# Clone repository
-git clone https://github.com/NoorAbdullah02/SafeLink-AI.git
-cd SafeLink-AI
-
-# Install dependencies
-pnpm install
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your DATABASE_URL, MISTRAL_API_KEY, BREVO_API_KEY
-
-# Run database migrations
-pnpm db:migrate
-
-# Start web and API servers
-pnpm dev
-```
-
-### Running Automated Test Suite
 ```sh
 pnpm test
+pnpm build
+pnpm audit
+pnpm demo:verify
 ```
-*All 29 integration and heuristic unit tests execute deterministically in ~4 seconds.*
 
-### Building Mobile App
+The local audit completed on 5 October 2026. All 73 website/API tests (64 backend and nine React DOM regressions) and 39 Flutter tests passed, Flutter analysis found no issues, the production build passed and the full dependency audit reported zero known advisories. Browser checks covered account/scan/history flows, keyboard navigation, responsive layouts and isolated family/community/admin fixtures. Flutter tests include core pages and Message demo cards at 320 logical pixels with 180% text scaling.
+
+Software tests do not measure real-world scam detection accuracy. Current results and remaining checks are in [the audit](docs/AUDIT-2026-10-04.md) and [validation record](docs/VALIDATION.md), with final [desktop](docs/qa/final-desktop.png) and [phone](docs/qa/final-phone.png) screenshots.
+
 ```sh
 cd mobile
 flutter pub get
-flutter build apk --debug
+flutter analyze
+flutter test
+flutter build apk --debug --dart-define=API_URL=https://your-safelink-host
 ```
 
----
+On 5 October 2026, the audited source was pushed to `codex/safelink-audit` and opened as [draft PR #1](https://github.com/NoorAbdullah02/SafeLink-AI/pull/1); `master` remains unchanged. The [successful GitHub Actions run](https://github.com/NoorAbdullah02/SafeLink-AI/actions/runs/37300673707) passed both `web-api` and `flutter` jobs, including Flutter analysis/tests, debug APK compilation, signature verification and checksum artifact generation. Download **SafeLink-AI-debug-apk** from that run. Its APK was built from source `3d20ae5` (`3d20ae59f2bdd6aa6db5a53da888592351441d68`); later documentation changes are not part of that artifact. Local verification passed: the downloaded archive digest matched GitHub, the extracted APK matched its SHA-256 file, and `apksigner` accepted its v2 debug signature (exit 0). No physical-device installation was performed.
 
-## 🔒 Security & Privacy by Design
+See [the mobile README](mobile/README.md) for phone connectivity and signing, and [the Android build record](docs/ANDROID-BUILD.md) for both build environments. The earlier Windows attempt was blocked by Application Control at `impellerc.exe`, produced no local APK and changed no security settings. The Linux CI build succeeded. No authorized Android device was connected for acceptance testing.
 
-- **Zero-Execution Destination Policy:** SafeLink **never** follows links, executes remote scripts, or renders untrusted external web pages on the server (complete protection against Server-Side Request Forgery - SSRF).
-- **In-Memory Image Processing:** Screenshots and QR images are processed strictly in RAM and never saved to persistent disk.
-- **Cryptographic Security:** Salted scrypt password hashing, opaque mobile bearer tokens, HttpOnly/SameSite session cookies.
-- **Auditable Moderation:** Admin audit trails for community scam reports and security alerts.
+CI uploads a test APK rather than overwriting a fixed public release tag. Public releases require the owner's signing configuration and an explicitly reviewed release.
 
----
+## Competition and deployment
 
-## 👥 Authors & Recognition
+Use [the competition demo guide](docs/COMPETITION-DEMO.md) for controlled inputs, presentation and judge questions, and [deployment instructions](docs/DEPLOYMENT.md) for hosting/release steps.
 
-Developed for cyber-safety innovation and national digital financial literacy in Bangladesh.  
-Repository maintained by [Noor Abdullah](https://github.com/NoorAbdullah02).
+Read-only checks passed for Neon connectivity and the expected columns of all ten tables, without reading personal rows or writing data. Brevo returned HTTP 200 with an active configured sender; no email was sent. Mistral returned HTTP 401 and needs the owner's provider/key correction and a new check. Google Safe Browsing is not configured. Real email delivery and external-model quality remain unverified.
 
-*License: MIT*
+The repository previously listed [a Render website](https://safelink-ai-8q6c.onrender.com) and [an Android release](https://github.com/NoorAbdullah02/SafeLink-AI/releases/tag/v1.0.0). Those are separately published versions. A later read-only Render health request returned HTTP 200 with PostgreSQL/email/AI configured and intelligence off; this reports configuration and does not prove the fixes are deployed or those providers work. The audited branch is pushed and CI has passed, but the draft PR is unmerged and deployment of the fixes remains pending. The cloud debug APK is a test artifact, not an updated public release.
+
+Owner repository: [NoorAbdullah02/SafeLink-AI](https://github.com/NoorAbdullah02/SafeLink-AI).

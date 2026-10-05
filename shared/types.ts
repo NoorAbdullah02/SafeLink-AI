@@ -1,7 +1,7 @@
 export type ScanKind = 'url' | 'message' | 'qr' | 'screenshot';
 export type Evidence = {
   id: string;
-  source: 'local' | 'community' | 'intelligence';
+  source: 'local' | 'community' | 'intelligence' | 'ai';
   title: string;
   detail: string;
   weight: number;

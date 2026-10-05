@@ -9,7 +9,7 @@ export function Landing({enter,dark,toggleTheme}:{enter:()=>void;dark:boolean;to
       <nav aria-label="Landing navigation"><a href="#protection">Protection</a><a href="#how-it-works">How it works</a></nav>
       <div className="lp-nav-actions"><button className="lp-theme" onClick={toggleTheme} aria-label={dark?'Use light theme':'Use dark theme'}>{dark?<Sun size={19}/>:<Moon size={19}/>}</button><button className="lp-button lp-small" onClick={enter}>Open workspace <ArrowUpRight size={16}/></button></div>
     </header>
-    <main id="landing-main" className="lp-main">
+    <main id="landing-main" className="lp-main" tabIndex={-1}>
       <section className="lp-hero">
         <div className="lp-hero-copy"><div className="lp-kicker"><span/> A LITTLE PAUSE. A LOT MORE PEACE OF MIND.</div>
           <h1>The internet moves fast.<br/><em>Trust takes<br/>a second look.</em></h1>

@@ -8,13 +8,14 @@ import { z } from 'zod';
 import { resolve } from 'node:path';
 import type { Store, Row } from './store.js';
 import { config, allowedOrigins } from './config.js';
-import { publicUser, token, hash, passwordHash, verifyPassword } from './security.js';
+import { publicUser, token, hash, passwordHash, verifyPassword, sessionToken, validSessionToken, rotateSessionVersion, resetTokenPurpose } from './security.js';
 import { localScan, finish, normalizeUrl, normalizePhone } from './engine.js';
-import { enrich } from './providers.js';
+import { enrich, aiSettings } from './providers.js';
 import { defaultBrands } from './brands.js';
 import { mailReady, sendMail, accountLink } from './mail.js';
 import { readImage } from './media.js';
 import { askCyberAssistant } from './assistant.js';
+import { privateHistoryResult } from './privacy.js';
 import { categories, type ScanResult, type ScanKind, type Brand } from '../shared/types.js';
 type Authed = Request & { user?: Row; sessionId?: string; accountUnavailable?: boolean };
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
@@ -33,7 +34,7 @@ const sessionCookie = 'safelink_session';
 export function createApp(store: Store) {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 0));
+  app.set('trust proxy', config.trustProxyHops);
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -53,6 +54,10 @@ export function createApp(store: Store) {
   app.use(cors({ origin: (origin, callback) => callback(null, !origin || origins.has(origin)), credentials: true }));
   app.use(express.json({ limit: '32kb' }));
   app.use(cookieParser());
+  app.use('/api', (_req, res, next) => {
+    res.set('Cache-Control', 'private, no-store');
+    next();
+  });
   app.use(
     '/api',
     rateLimit({ windowMs: 60000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }),
@@ -60,10 +65,7 @@ export function createApp(store: Store) {
   app.use('/api', (req, res, next) => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin) {
       const origin = req.headers.origin;
-      const host = req.get('host');
-      const isSameHost = Boolean(host && (origin === `https://${host}` || origin === `http://${host}`));
-      const isMobile = req.headers['x-safelink-client'] === 'mobile';
-      if (!origins.has(origin) && !isSameHost && !isMobile) {
+      if (!origins.has(origin)) {
         return next(fail(403, 'Request origin is not allowed.'));
       }
     }
@@ -79,7 +81,7 @@ export function createApp(store: Store) {
         const s = (await store.list('sessions', { tokenHash: hash(value) }))[0];
         if (s && new Date(s.expiresAt) > new Date()) {
           const u = (await store.list('users', { id: s.userId }))[0];
-          if (u && !u.disabled) {
+          if (u && !u.disabled && validSessionToken(value, u.passwordHash)) {
             req.user = u;
             req.sessionId = s.id;
           }
@@ -116,7 +118,7 @@ export function createApp(store: Store) {
     legacyHeaders: false,
   });
   const issueSession = async (req: Request, res: Response, u: Row) => {
-    const value = token();
+    const value = sessionToken(u.passwordHash);
     await store.insert('sessions', {
       userId: u.id,
       tokenHash: hash(value),
@@ -139,7 +141,7 @@ export function createApp(store: Store) {
     await store.insert('authTokens', {
       userId: u.id,
       tokenHash: hash(value),
-      purpose,
+      purpose: purpose === 'reset' ? resetTokenPurpose(u.passwordHash) : purpose,
       expiresAt: new Date(Date.now() + 30 * 60000),
     });
     return value;
@@ -156,11 +158,7 @@ export function createApp(store: Store) {
       ok: true,
       storage: store.memory ? 'temporary-memory' : 'postgresql',
       email: mailReady(),
-      ai: Boolean(
-        (process.env.LLM_API_KEY && process.env.LLM_MODEL) ||
-          process.env.MISTRAL_KEY ||
-          process.env.MISTRIAL_KEY,
-      ),
+      ai: Boolean(aiSettings()),
       intelligence: Boolean(process.env.SAFE_BROWSING_API_KEY),
     }),
   );
@@ -196,7 +194,7 @@ export function createApp(store: Store) {
     if (!u || !valid || u.disabled) throw fail(401, 'Email or password is incorrect.');
     res.json(await issueSession(req, res, u));
   });
-  app.post('/api/auth/logout', auth, async (req: Authed, res) => {
+  app.post('/api/auth/logout', async (req: Authed, res) => {
     if (req.sessionId) await store.remove('sessions', req.sessionId);
     res.clearCookie(sessionCookie, { path: '/' }).json({ ok: true });
   });
@@ -252,20 +250,30 @@ export function createApp(store: Store) {
     if (consuming.has(digest)) throw fail(400, 'This link is already being used.');
     consuming.add(digest);
     try {
-      const t = await store.consumeToken(digest, data.purpose);
+      const candidate = data.purpose === 'reset'
+        ? (await store.list('authTokens', { tokenHash: digest }))[0]
+        : undefined;
+      // Preserve verification tokens when a caller submits the wrong purpose.
+      if (data.purpose === 'reset' && !candidate?.purpose?.startsWith('reset:'))
+        throw fail(400, 'This reset link is invalid or expired. Request a new link.');
+      const t = await store.consumeToken(digest, candidate?.purpose || data.purpose);
       if (!t || new Date(t.expiresAt) < new Date())
         throw fail(400, 'This link is invalid or expired.');
-    await store.update(
-        'users',
-        t.userId,
-        data.purpose === 'verify'
-          ? { verified: true }
-          : { passwordHash: await passwordHash(data.password!) },
-      );
+      if (data.purpose === 'verify') {
+        if (!await store.update('users', t.userId, { verified: true })) throw fail(400, 'This account is no longer available.');
+      } else {
+        const user = (await store.list('users', { id: t.userId }))[0];
+        if (!user) throw fail(400, 'This account is no longer available.');
+        if (t.purpose !== resetTokenPurpose(user.passwordHash))
+          throw fail(400, 'Account credentials changed. Request a new password reset link.');
+        if (!await store.updateUserIfPasswordMatches(user.id, user.passwordHash, { passwordHash: await passwordHash(data.password!) }))
+          throw fail(409, 'Account credentials changed. Request a new password reset link.');
+      }
       if (data.purpose === 'reset') {
         for (const s of await store.list('sessions', { userId: t.userId }))
           await store.remove('sessions', s.id);
-        for (const token of await store.list('authTokens', { userId: t.userId, purpose: 'reset' })) await store.remove('authTokens',token.id);
+        for (const token of await store.list('authTokens', { userId: t.userId }))
+          if (token.purpose === 'reset' || token.purpose.startsWith('reset:')) await store.remove('authTokens', token.id);
       }
       res.json({ ok: true });
     } finally {
@@ -335,16 +343,7 @@ export function createApp(store: Store) {
       });
     if (req.user && data.save) {
       try {
-        const stored = {
-          ...r,
-          extractedText: undefined,
-          urls: r.urls.map((u) => new URL(u).origin),
-          phones: [],
-          evidence: r.evidence.map((e) => ({
-            ...e,
-            detail: e.detail.replace(/\+?\d{8,}/g, '[number removed]'),
-          })),
-        };
+        const stored = privateHistoryResult(r);
         await store.insert('scans', {
           id: r.id,
           userId: req.user.id,
@@ -368,21 +367,22 @@ export function createApp(store: Store) {
   app.post('/api/scans', scanLimit, async (req: Authed, res) =>
     res.json(await runScan(req, scanInput.parse(req.body))),
   );
-  app.post('/api/assistant', async (req: Authed, res) => {
+  app.post('/api/assistant', scanLimit, async (req: Authed, res) => {
     const input = z
       .object({
         message: z.string().trim().min(1).max(3000),
+        external: z.boolean().default(false),
         history: z
           .array(
             z.object({
-              role: z.string(),
-              content: z.string(),
+              role: z.enum(['user', 'assistant']),
+              content: z.string().max(3000),
             }),
           )
-          .optional(),
+          .max(12).optional(),
       })
       .parse(req.body);
-    const result = await askCyberAssistant(input.message, input.history);
+    const result = await askCyberAssistant(input.message, input.history, input.external);
     res.json(result);
   });
   const upload = multer({
@@ -390,7 +390,12 @@ export function createApp(store: Store) {
     limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 4 },
   });
   app.post('/api/scans/image', scanLimit, upload.single('image'), async (req: Authed, res) => {
-    const kind = z.enum(['qr', 'screenshot']).parse(req.body.kind);
+    const options = z.object({
+      kind: z.enum(['qr', 'screenshot']),
+      external: z.enum(['true', 'false']).default('false'),
+      save: z.enum(['true', 'false']).default('true'),
+    }).parse(req.body);
+    const kind = options.kind;
     if (!req.file) throw fail(400, 'Choose an image.');
     let text: string;
     try {
@@ -401,8 +406,8 @@ export function createApp(store: Store) {
     const r = await runScan(req, {
       kind,
       text,
-      external: req.body.external === 'true',
-      save: req.body.save !== 'false',
+      external: options.external === 'true',
+      save: options.save === 'true',
     });
     res.json({ ...r, extractedText: text });
   });
@@ -411,7 +416,7 @@ export function createApp(store: Store) {
       (await store.list('scans', { userId: req.user!.id }))
         .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
         .slice(0, 200)
-        .map((r) => ({ ...r.result, saved: r.saved, persisted: true })),
+        .map((r) => ({ ...privateHistoryResult(r.result), saved: r.saved, persisted: true })),
     ),
   );
   const own = async (t: 'scans' | 'contacts', id: string, userId: string) => {
@@ -473,9 +478,10 @@ export function createApp(store: Store) {
   );
   app.post('/api/contacts', auth, async (req: Authed, res) => {
     const data = z.object({ name: z.string().trim().min(2).max(80), email }).parse(req.body);
-    if ((await store.list('contacts', { userId: req.user!.id })).length >= 10)
+    const contact = await store.insertContactWithinLimit({ ...data, userId: req.user!.id });
+    if (!contact)
       throw fail(400, 'You can add up to 10 trusted contacts.');
-    res.status(201).json(await store.insert('contacts', { ...data, userId: req.user!.id }));
+    res.status(201).json(contact);
   });
   app.delete('/api/contacts/:id', auth, async (req: Authed, res) => {
     const row = await own('contacts', String(req.params.id), req.user!.id);
@@ -527,7 +533,7 @@ export function createApp(store: Store) {
       recent: rows
         .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
         .slice(0, 6)
-        .map((r) => r.result),
+        .map((r) => ({ ...privateHistoryResult(r.result), saved: r.saved, persisted: true })),
     });
   });
   app.get('/api/graph', auth, async (req: Authed, res) => {
@@ -548,7 +554,7 @@ export function createApp(store: Store) {
       .parse(req.params.table);
     const rows = await store.list(t);
     res.json(
-      rows.slice(-500).map((r) => (t === 'users' ? { ...publicUser(r), disabled: r.disabled } : r)),
+      rows.slice(-500).map((r) => t === 'users' ? { ...publicUser(r), disabled: r.disabled } : t === 'scans' ? { ...r, result: privateHistoryResult(r.result) } : r),
     );
   });
   app.patch('/api/admin/reports/:id', async (req: Authed, res) => {
@@ -566,7 +572,16 @@ export function createApp(store: Store) {
     const id = z.uuid().parse(req.params.id);
     if (id === req.user!.id) throw fail(400, 'You cannot change your own administrative access.');
     const data = z.object({ disabled: z.boolean() }).parse(req.body);
-    if(!await store.update('users', id, data)) throw fail(404,'User not found.');
+    let updated: Row | undefined;
+    for (let attempt = 0; attempt < 3 && !updated; attempt++) {
+      const target = (await store.list('users', { id }))[0];
+      if (!target) throw fail(404, 'User not found.');
+      updated = await store.updateUserIfPasswordMatches(id, target.passwordHash, {
+        ...data,
+        ...(data.disabled ? { passwordHash: rotateSessionVersion(target.passwordHash) } : {}),
+      });
+    }
+    if (!updated) throw fail(409, 'Account credentials changed. Please try again.');
     if(data.disabled) for(const session of await store.list('sessions',{userId:id})) await store.remove('sessions',session.id);
     await store.insert('adminLogs', {
       userId: req.user!.id,
@@ -623,7 +638,7 @@ export function createApp(store: Store) {
       error:
         err instanceof z.ZodError
           ? err.issues.map((i) => i.message).join(' ')
-          : status === 409
+          : status === 409 && (err.code === '23505' || err.cause?.code === '23505')
             ? 'This entry already exists.'
             : status >= 500
               ? (status===503 && err.status===503 ? err.message : 'Service temporarily unavailable. Please try again.')

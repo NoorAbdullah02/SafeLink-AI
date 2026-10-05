@@ -2,7 +2,7 @@
 
 Base path: `/api`. Requests and responses use JSON except image uploads. Errors have `{ "error": "message" }`. Zod input errors use 400; unauthenticated requests 401; forbidden requests 403; missing records 404; duplicate entries 409; unreadable images 422; rate limits 429; unavailable providers 503.
 
-Web clients use the HttpOnly session cookie. Native clients send `X-SafeLink-Client: mobile` on login/registration, store the returned token in secure storage and send `Authorization: Bearer <token>` on subsequent calls. Tokens expire after seven days. Do not store web sessions in localStorage.
+Web clients use the HttpOnly session cookie. Native clients send `X-SafeLink-Client: mobile` on login/registration, store the returned token in secure storage and send `Authorization: Bearer <token>` on subsequent calls. Tokens expire after seven days and are bound to the current password/session version. Password resets and administrator disabling invalidate old bindings, including concurrent logins. Pre-audit sessions require sign-in again. Mobile credentials are bound to the selected API server. Do not store web sessions in localStorage.
 
 | Method | Route | Input / behavior |
 |---|---|---|
@@ -17,6 +17,7 @@ Web clients use the HttpOnly session cookie. Native clients send `X-SafeLink-Cli
 | POST | `/auth/confirm` | `token`, `purpose: verify/reset`; reset also requires `password` |
 | POST | `/scans` | `kind: url/message/qr/screenshot`, `text`, optional `external` (false), `save` (true) |
 | POST | `/scans/image` | Multipart `image`, `kind: qr/screenshot`, `external: true/false`, `save: true/false` |
+| POST | `/assistant` | `message` (1–3000 chars), optional `history` (up to 12 user/assistant entries), `external` (false). Returns `reply`, `suggestions`, sourced `hotlines`, `source: local/ai`, `externalUsed`. |
 | GET | `/scans` | Current user’s latest 200 redacted results |
 | PATCH | `/scans/:id` | `saved: boolean` |
 | DELETE | `/scans/:id` | Delete own scan |
@@ -34,6 +35,10 @@ Web clients use the HttpOnly session cookie. Native clients send `X-SafeLink-Cli
 
 `scans` returns `id`, `kind`, `score`, `level`, `threatType`, `evidence[]`, `checks[]`, `explanation`, nullable `aiExplanation`, `recommendation`, `urls[]`, `phones[]`, `createdAt`, `preview`, `persisted`, and extracted text for image scans. The text-based endpoint with kind `screenshot` accepts already-extracted text; use the multipart endpoint to perform OCR.
 
-Evidence has `id`, `source` (local/community/intelligence), `title`, `detail`, `weight`. A check has `name`, `status` (complete/unavailable/skipped), and `detail`. AI adds only its labeled semantic contribution and explanation; it cannot create deterministic evidence.
+Evidence has `id`, `source` (local/community/intelligence/ai), `title`, `detail`, `weight`. A check has `name`, `status` (complete/unavailable/skipped), and `detail`. AI adds its labelled semantic evidence/contribution and explanation; it cannot claim deterministic findings it did not receive.
 
 All scan types pass through the same backend risk pipeline. A guest can scan without saving. QR text that is not a URL is treated as message content and is never opened.
+
+Saved history omits raw message/OCR text, extracted phone numbers and AI free text and reduces URLs to origins. Legacy results are redacted on reads too. This cannot identify every secret in free-text evidence. External provider content is partially redacted and needs explicit consent; assistant consent is separate from scan consent. `externalUsed=true` on an assistant fallback means provider submission was attempted even though the displayed response is local guidance.
+
+`/health` reports configuration, not a live database/provider connection test. API responses use `Cache-Control: private, no-store`.

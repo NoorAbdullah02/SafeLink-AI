@@ -37,6 +37,51 @@ function languageDirectory() {
   return languageReady;
 }
 let active = 0;
+type OCRWorker = {
+  recognize(image: Buffer): Promise<{ data: { text: string } }>;
+  terminate(): Promise<unknown>;
+};
+export async function recognizeScreenshot(
+  image: Buffer,
+  workerFactory: () => Promise<OCRWorker> = async () => createWorker(['eng', 'ben'], 1, {
+    langPath: await languageDirectory(),
+    errorHandler: () => {},
+    cacheMethod: 'readOnly',
+  }),
+  timeoutMs = 30000,
+): Promise<string> {
+  let worker: OCRWorker | undefined;
+  let expired = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      (async () => {
+        worker = await workerFactory();
+        // Initialization can finish after the request deadline. Stop that worker too.
+        if (expired) {
+          await worker.terminate();
+          throw new Error('OCR initialization timed out.');
+        }
+        const data = await worker.recognize(image);
+        const text = data.data.text.trim();
+        if (text.length < 3)
+          throw new Error('No readable text found. Try a clearer screenshot or paste the text.');
+        return text.slice(0, 10000);
+      })(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          expired = true;
+          reject(new Error('OCR timed out. Try a smaller, clearer screenshot or paste the text.'));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    if (!expired && worker) await worker.terminate();
+    else if (worker) void worker.terminate().catch(() => {});
+    expired = true;
+  }
+}
 export async function readImage(buffer: Buffer, kind: 'qr' | 'screenshot'): Promise<string> {
   if (active >= 2)
     throw Object.assign(new Error('Image scanner is busy. Please try again shortly.'), {
@@ -64,30 +109,7 @@ export async function readImage(buffer: Buffer, kind: 'qr' | 'screenshot'): Prom
       .normalize()
       .png()
       .toBuffer();
-    const worker = await createWorker(['eng', 'ben'], 1, {
-      langPath: await languageDirectory(),
-      errorHandler: () => {},
-      cacheMethod: 'readOnly',
-    });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const data = await Promise.race([
-        worker.recognize(image),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error('OCR timed out. Try a smaller, clearer screenshot.')),
-            30000,
-          );
-        }),
-      ]);
-      const text = data.data.text.trim();
-      if (text.length < 3)
-        throw new Error('No readable text found. Try a clearer screenshot or paste the text.');
-      return text.slice(0, 10000);
-    } finally {
-      clearTimeout(timer);
-      await worker.terminate();
-    }
+    return await recognizeScreenshot(image);
   } finally {
     active--;
   }

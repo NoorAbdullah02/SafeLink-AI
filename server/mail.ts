@@ -15,6 +15,7 @@ export async function sendMail(
   try {
     const response = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
+      redirect: 'error',
       signal: AbortSignal.timeout(10000),
       headers: { 'api-key': process.env.BREVO_API_KEY!, 'Content-Type': 'application/json' },
       body: JSON.stringify({

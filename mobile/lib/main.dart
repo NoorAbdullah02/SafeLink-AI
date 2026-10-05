@@ -14,11 +14,14 @@ void main() {
 const green = Color(0xff19876b);
 
 class SafeLinkApp extends StatelessWidget {
-  const SafeLinkApp({super.key});
+  final SafeLinkApi? api;
+  final ImagePicker? imagePicker;
+  const SafeLinkApp({super.key, this.api, this.imagePicker});
   @override
   Widget build(BuildContext context) => MaterialApp(
       title: 'SafeLink AI',
       debugShowCheckedModeBanner: false,
+      themeMode: ThemeMode.light,
       theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: green),
           scaffoldBackgroundColor: Color(0xfff5f7f9),
@@ -27,62 +30,15 @@ class SafeLinkApp extends StatelessWidget {
           inputDecorationTheme: InputDecorationTheme(
               border:
                   OutlineInputBorder(borderRadius: BorderRadius.circular(12)))),
-      darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-              seedColor: green, brightness: Brightness.dark),
-          splashFactory: InkRipple.splashFactory,
-          useMaterial3: true),
-      home: Workspace());
+      home: Workspace(api: api, imagePicker: imagePicker));
 }
 
 class Workspace extends StatefulWidget {
-  const Workspace({super.key});
+  final SafeLinkApi? api;
+  final ImagePicker? imagePicker;
+  const Workspace({super.key, this.api, this.imagePicker});
   @override
   State<Workspace> createState() => _WorkspaceState();
-}
-
-class HelplineItem {
-  final String name;
-  final String bengali;
-  final String hotline;
-  final String shortcode;
-  final String domain;
-  final String tag;
-  final Color color;
-  final String desc;
-
-  const HelplineItem({
-    required this.name,
-    required this.bengali,
-    required this.hotline,
-    required this.shortcode,
-    required this.domain,
-    required this.tag,
-    required this.color,
-    required this.desc,
-  });
-}
-
-class PipelineStageItem {
-  final String stepNumber;
-  final String layer;
-  final String title;
-  final String latency;
-  final String status;
-  final bool isDanger;
-  final IconData icon;
-  final String detail;
-
-  const PipelineStageItem({
-    required this.stepNumber,
-    required this.layer,
-    required this.title,
-    required this.latency,
-    required this.status,
-    required this.isDanger,
-    required this.icon,
-    required this.detail,
-  });
 }
 
 class EmergencyContactItem {
@@ -102,13 +58,19 @@ class EmergencyContactItem {
 }
 
 class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
-  final api = SafeLinkApi();
+  late final SafeLinkApi api;
+  late final ImagePicker imagePicker;
   final input = TextEditingController();
   static const shareChannel = MethodChannel('safelink/share');
   Map<String, dynamic>? user, result;
   int page = 0;
-  int unreadNotifications = 3;
-  bool scamAlertsEnabled = true;
+  int unreadNotifications = 0;
+  bool clipboardSuggestionsEnabled = false;
+  bool initialized = false;
+  String? pendingSharedText;
+  bool pendingAutoScan = false;
+  bool accountRefreshPending = false;
+  bool galleryRecoveryPending = false;
   String kind = 'url', status = 'Connecting…';
   bool external = false, busy = false, simple = false;
   List<dynamic> history = [], contacts = [], alerts = [];
@@ -121,13 +83,15 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    api = widget.api ?? SafeLinkApi();
+    imagePicker = widget.imagePicker ?? ImagePicker();
     WidgetsBinding.instance.addObserver(this);
     initialize();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed && clipboardSuggestionsEnabled) {
       _checkClipboardOnResume();
     }
   }
@@ -177,6 +141,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     try {
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final text = data?.text?.trim() ?? '';
+      if (!mounted) return;
       if (text.isEmpty) {
         message('ক্লিপবোর্ডে কোনো টেক্সট বা লিঙ্ক নেই।');
         return;
@@ -217,24 +182,40 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
           receiveText(call.arguments as String?, autoScan: true);
         }
       });
-      try {
-        final initial = await shareChannel.invokeMethod<String>('getInitialText');
-        if (initial != null && initial.trim().isNotEmpty) {
-          receiveText(initial, autoScan: true);
-        }
-      } catch (_) {}
     }
     try {
       await api.restore();
-      final health = await api.call('/health');
+      initialized = true;
+      // Restore the endpoint-bound token before starting shared scans; do not
+      // make Android share handling wait for a slow health/profile response.
+      if (!kIsWeb && Platform.isAndroid && mounted) {
+        try {
+          final initial =
+              await shareChannel.invokeMethod<String>('getInitialText');
+          if (initial != null) receiveText(initial, autoScan: true);
+        } catch (_) {}
+      }
+      final pending = pendingSharedText;
+      if (pending != null && mounted) {
+        pendingSharedText = null;
+        receiveText(pending, autoScan: pendingAutoScan);
+      }
       if (api.token != null) {
         try {
-          user = Map<String, dynamic>.from(await api.call('/me'));
-          simple = user?['simpleMode'] == true;
-        } catch (_) {
-          api.token = null;
+          final account = Map<String, dynamic>.from(await api.call('/me'));
+          if (mounted) {
+            setState(() {
+              user = account;
+              simple = account['simpleMode'] == true;
+            });
+          }
+        } on ApiException catch (e) {
+          if (e.statusCode == 401 && mounted) {
+            _clearAccount();
+          }
         }
       }
+      final health = await api.call('/health');
       if (mounted) {
         setState(() => status = health['storage'] == 'temporary-memory'
             ? 'Temporary demo · data resets on restart'
@@ -244,12 +225,47 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
       if (mounted) {
         setState(() => status = 'Backend unavailable. Check connection.');
       }
+    } finally {
+      initialized = true;
+      final pending = pendingSharedText;
+      if (pending != null && mounted) {
+        pendingSharedText = null;
+        receiveText(pending, autoScan: pendingAutoScan);
+      }
+      if (!kIsWeb && Platform.isAndroid && mounted) {
+        if (busy) {
+          galleryRecoveryPending = true;
+        } else {
+          await recoverLostImage();
+        }
+      }
     }
+  }
+
+  void _clearAccount() {
+    if (!mounted) return;
+    setState(() {
+      user = null;
+      history = [];
+      contacts = [];
+      alerts = [];
+      result = null;
+    });
   }
 
   void receiveText(String? text, {bool autoScan = false}) {
     if (text == null || text.trim().isEmpty || !mounted) return;
     final trimmed = text.trim();
+    if (trimmed.length > 10000) {
+      message(
+          'Use at most 10,000 characters. Remove private information before scanning.');
+      return;
+    }
+    if (!initialized || busy) {
+      pendingSharedText = trimmed;
+      pendingAutoScan = autoScan;
+      return;
+    }
     setState(() {
       page = 0;
       kind = trimmed.startsWith('http') && !trimmed.contains(' ')
@@ -262,7 +278,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
       _showClipboardBanner = false;
     });
     if (autoScan) {
-      message('অন্য অ্যাপ থেকে লিঙ্ক/মেসেজ শেয়ার হয়েছে — এআই স্ক্যান শুরু হচ্ছে…');
+      message(
+          'অন্য অ্যাপ থেকে লিঙ্ক/মেসেজ শেয়ার হয়েছে — এআই স্ক্যান শুরু হচ্ছে…');
       scanText();
     }
   }
@@ -272,6 +289,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     input.dispose();
     shareChannel.setMethodCallHandler(null);
+    if (widget.api == null) api.close();
     super.dispose();
   }
 
@@ -283,80 +301,147 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   }
 
   Future<void> action(Future<void> Function() fn) async {
-    if (busy) return;
+    if (busy || !mounted) return;
     setState(() => busy = true);
     try {
       await fn();
     } catch (e) {
+      if (e is ApiException && e.statusCode == 401) _clearAccount();
       message(e);
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) {
+        setState(() => busy = false);
+        final pending = pendingSharedText;
+        if (initialized && pending != null) {
+          pendingSharedText = null;
+          receiveText(pending, autoScan: pendingAutoScan);
+        } else if (galleryRecoveryPending) {
+          galleryRecoveryPending = false;
+          recoverLostImage();
+        } else if (accountRefreshPending) {
+          accountRefreshPending = false;
+          if (page == 2 || page == 3) loadAccountData();
+        }
+      }
     }
   }
 
   Future<void> scanText() async {
+    if (busy || !mounted) return;
     final raw = input.text.trim();
     if (raw.isEmpty) {
       message('Paste a link or message first.');
       return;
     }
+    if (raw.length > 10000) {
+      message('Use at most 10,000 characters.');
+      return;
+    }
     var targetKind = kind;
-    final isUrl = raw.startsWith('http://') ||
-        raw.startsWith('https://') ||
-        (!raw.contains(' ') && !raw.contains('\n') && raw.contains('.'));
+    final isUrl = !RegExp(r'\s').hasMatch(raw) &&
+        (raw.startsWith('http://') ||
+            raw.startsWith('https://') ||
+            raw.contains('.'));
     if (!isUrl && targetKind == 'url') {
       targetKind = 'message';
       if (mounted) setState(() => kind = 'message');
-    } else if (isUrl && targetKind == 'message' && !raw.contains(' ') && !raw.contains('\n')) {
+    } else if (isUrl &&
+        targetKind == 'message' &&
+        !raw.contains(' ') &&
+        !raw.contains('\n')) {
       targetKind = 'url';
       if (mounted) setState(() => kind = 'url');
     }
     await action(() async {
+      setState(() => result = null);
       final data = await api.scan(raw, targetKind, external);
       if (mounted) setState(() => result = data);
     });
   }
 
   Future<void> scanImage(String type) async {
-    try {
-      final file = await ImagePicker().pickImage(source: ImageSource.gallery);
-      if (file == null || !mounted) return;
-      await action(() async {
-        final data = await api.image(file, type, external);
+    final consent = external;
+    await action(() async {
+      await api.storage.write(key: 'pending_image_kind', value: type);
+      try {
+        final file = await imagePicker.pickImage(
+            source: ImageSource.gallery,
+            maxWidth: 2200,
+            maxHeight: 2200,
+            imageQuality: 90);
+        if (file == null || !mounted) return;
+        setState(() => result = null);
+        final data = await api.image(file, type, consent);
         if (mounted) {
           setState(() {
             result = data;
             page = 0;
           });
         }
-      });
-    } catch (e) {
-      message(e);
-    }
+      } finally {
+        await api.storage.delete(key: 'pending_image_kind');
+      }
+    });
+  }
+
+  Future<void> recoverLostImage() async {
+    await action(() async {
+      final recovered = await imagePicker.retrieveLostData();
+      if (recovered.isEmpty || !mounted) return;
+      final files = recovered.files ??
+          (recovered.file == null ? null : [recovered.file!]);
+      if (files == null || files.isEmpty) {
+        message(
+            'The selected image could not be recovered. Please choose it again.');
+        return;
+      }
+      final previousKind = await api.storage.read(key: 'pending_image_kind');
+      final type = previousKind == 'qr' ? 'qr' : 'screenshot';
+      try {
+        // A restarted app has no current external-provider consent.
+        final data = await api.image(files.first, type, false);
+        if (mounted) {
+          setState(() {
+            result = data;
+            page = 0;
+          });
+          message(
+              'Recovered and scanned the image selected before the app restarted.');
+        }
+      } finally {
+        await api.storage.delete(key: 'pending_image_kind');
+      }
+    });
   }
 
   Future<void> scanCamera() async {
-    final value = await Navigator.of(context)
-        .push<String>(MaterialPageRoute(builder: (_) => QrCamera()));
-    if (value == null || !mounted) return;
-    setState(() {
-      input.text = value;
-      input.selection =
-          TextSelection.fromPosition(TextPosition(offset: value.length));
-      kind = value.trim().startsWith('http') ||
-              (!value.trim().contains(' ') && value.trim().contains('.'))
-          ? 'url'
-          : 'message';
-      page = 0;
-    });
+    final consent = external;
     await action(() async {
-      final data = await api.scan(value, 'qr', external);
+      final value = await Navigator.of(context)
+          .push<String>(MaterialPageRoute(builder: (_) => QrCamera()));
+      if (value == null || !mounted) return;
+      setState(() {
+        input.text = value;
+        input.selection =
+            TextSelection.fromPosition(TextPosition(offset: value.length));
+        kind = value.trim().startsWith('http') ||
+                (!value.trim().contains(' ') && value.trim().contains('.'))
+            ? 'url'
+            : 'message';
+        page = 0;
+        result = null;
+      });
+      final data = await api.scan(value, 'qr', consent);
       if (mounted) setState(() => result = data);
     });
   }
 
   Future<void> loadAccountData() async {
     if (user == null) return;
+    if (busy) {
+      accountRefreshPending = true;
+      return;
+    }
     await action(() async {
       final results = await Future.wait(
           [api.call('/scans'), api.call('/contacts'), api.call('/alerts')]);
@@ -371,6 +456,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   }
 
   Future<void> login() async {
+    if (busy || !mounted) return;
     final value = await Navigator.of(context).push<Map<String, dynamic>>(
         MaterialPageRoute(builder: (_) => AuthPage(api: api)));
     if (value != null && mounted) {
@@ -378,17 +464,25 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
         user = value;
         simple = value['simpleMode'] == true;
       });
+      await loadAccountData();
     }
   }
 
   Future<void> changeServerUrl() async {
+    if (busy) return;
     final newUrl = await showDialog<String>(
-        context: context,
-        builder: (_) => ServerDialog(initialUrl: api.base));
-    if (newUrl != null && mounted) {
+        context: context, builder: (_) => ServerDialog(initialUrl: api.base));
+    if (newUrl == null || !mounted) return;
+    final previous = api.base;
+    try {
       await api.setBaseUrl(newUrl);
-      setState(() => status = 'Connecting to ${api.base}…');
+      if (!mounted) return;
+      if (api.base != previous) _clearAccount();
+      setState(() => status = 'Connecting to SafeLink…');
       await initialize();
+    } catch (e) {
+      if (mounted && api.base != previous) _clearAccount();
+      message(e);
     }
   }
 
@@ -426,15 +520,16 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                 padding: EdgeInsets.zero,
                 constraints: BoxConstraints(minWidth: 32, minHeight: 32),
                 icon: Icon(Icons.smart_toy_outlined, color: green, size: 20),
-                tooltip: '🤖 সাইবার এআই সহকারী (Live AI Copilot)',
+                tooltip: '🤖 সাইবার এআই সহকারী (Safety Assistant)',
                 onPressed: () => showCyberAssistantBottomSheet(),
               ),
               IconButton(
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
                 constraints: BoxConstraints(minWidth: 32, minHeight: 32),
-                icon: Icon(Icons.crisis_alert, color: Colors.redAccent, size: 20),
-                tooltip: '🚨 একাউন্ট ফ্রিজ (Panic Button)',
+                icon:
+                    Icon(Icons.crisis_alert, color: Colors.redAccent, size: 20),
+                tooltip: 'জরুরি প্রতারণা সহায়তা',
                 onPressed: showEmergencyFreezeDialog,
               ),
               IconButton(
@@ -484,7 +579,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.symmetric(horizontal: 4),
                   ),
-                  onPressed: login,
+                  onPressed: busy ? null : login,
                   child: Text('Sign in', style: TextStyle(fontSize: 12)),
                 )
             ]),
@@ -518,9 +613,10 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                       child: Text(status,
                                           style: TextStyle(
                                               fontSize: 12,
-                                              color: status.contains('unavailable')
-                                                  ? Colors.red
-                                                  : green,
+                                              color:
+                                                  status.contains('unavailable')
+                                                      ? Colors.red
+                                                      : green,
                                               fontWeight: FontWeight.w600)),
                                     ),
                                     Icon(Icons.tune, size: 16, color: green)
@@ -536,7 +632,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                         child: CircularProgressIndicator(
                                             color: green))),
                               SizedBox(height: 20),
-                              Text('Risk scores are indicators, not guarantees.',
+                              Text(
+                                  'Risk scores are indicators, not guarantees.',
                                   textAlign: TextAlign.center,
                                   style: TextStyle(fontSize: 12))
                             ],
@@ -558,8 +655,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             destinations: const [
               NavigationDestination(
                   icon: Icon(Icons.document_scanner_outlined), label: 'Scan'),
-              NavigationDestination(
-                  icon: Icon(Icons.radar), label: 'Threat Radar'),
+              NavigationDestination(icon: Icon(Icons.radar), label: 'Learn'),
               NavigationDestination(
                   icon: Icon(Icons.history), label: 'History'),
               NavigationDestination(
@@ -627,8 +723,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: green.withValues(alpha: 0.2)),
+                            border:
+                                Border.all(color: green.withValues(alpha: 0.2)),
                           ),
                           child: Text(
                             _clipboardPreview,
@@ -651,7 +747,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                   setState(() => _showClipboardBanner = false),
                               child: Text('উপেক্ষা করুন',
                                   style: TextStyle(
-                                      color: Colors.grey.shade700, fontSize: 12)),
+                                      color: Colors.grey.shade700,
+                                      fontSize: 12)),
                             ),
                             FilledButton.icon(
                               icon: Icon(Icons.bolt, size: 15),
@@ -668,7 +765,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                   _showClipboardBanner = false;
                                   input.text = _clipboardText;
                                   input.selection = TextSelection.fromPosition(
-                                      TextPosition(offset: _clipboardText.length));
+                                      TextPosition(
+                                          offset: _clipboardText.length));
                                   kind = _clipboardText.startsWith('http') ||
                                           (!_clipboardText.contains(' ') &&
                                               _clipboardText.contains('.'))
@@ -704,13 +802,16 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                     icon: Icon(Icons.chat_bubble_outline))
               ],
               selected: {kind},
-              onSelectionChanged: (value) => setState(() {
-                    kind = value.first;
-                    result = null;
-                  })),
+              onSelectionChanged: busy
+                  ? null
+                  : (value) => setState(() {
+                        kind = value.first;
+                        result = null;
+                      })),
           SizedBox(height: 20),
           TextField(
               controller: input,
+              enabled: !busy,
               minLines: 3,
               maxLines: 7,
               maxLength: 10000,
@@ -722,6 +823,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                       maxLength}) =>
                   null,
               onChanged: (val) {
+                setState(() => result = null);
                 final trimmed = val.trim();
                 if (trimmed.isNotEmpty) {
                   final looksLikeUrl = trimmed.startsWith('http://') ||
@@ -757,12 +859,14 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                           tooltip: 'Clear text',
                           icon: Icon(Icons.clear,
                               color: Colors.grey.shade600, size: 20),
-                          onPressed: () {
-                            setState(() {
-                              input.clear();
-                              result = null;
-                            });
-                          },
+                          onPressed: busy
+                              ? null
+                              : () {
+                                  setState(() {
+                                    input.clear();
+                                    result = null;
+                                  });
+                                },
                         ),
                       IconButton(
                         tooltip: 'Paste & Scan from Clipboard',
@@ -781,7 +885,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                   'Sends text/URLs to configured providers. Remove private information first.',
                   style: TextStyle(fontSize: 12)),
               value: external,
-              onChanged: (v) => setState(() => external = v)),
+              onChanged: busy ? null : (v) => setState(() => external = v)),
           SizedBox(height: 10),
           FilledButton.icon(
               onPressed: busy ? null : scanText,
@@ -877,7 +981,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    '4 LIVE SAMPLES',
+                    '4 EXAMPLES',
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
@@ -893,31 +997,36 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             icon: Icons.link,
             color: Colors.red,
             title: 'bKash Spoof Link',
-            tag: 'HOMOGRAPH SPOOF',
+            tag: 'BRAND LOOKALIKE',
             preview: 'https://bkash-reward.xyz/login',
-            onTap: () => loadDemoScenario('url', 'https://bkash-reward.xyz/login'),
+            onTap: () =>
+                loadDemoScenario('url', 'https://bkash-reward.xyz/login'),
           ),
           _demoScenarioCard(
             icon: Icons.chat_bubble_outline,
             color: Colors.deepOrange,
             title: 'Banglish PIN Scam',
             tag: 'BANGLISH OTP',
-            preview: 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.',
-            onTap: () => loadDemoScenario('message', 'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.'),
+            preview:
+                'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.',
+            onTap: () => loadDemoScenario('message',
+                'Apnar bKash account bondho hoyeche! 10 min er moddhe PIN pathan.'),
           ),
           _demoScenarioCard(
             icon: Icons.card_giftcard,
             color: Colors.orange.shade800,
             title: 'Bangla Lottery Scam',
             tag: 'BANGLA LOTTERY',
-            preview: 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।',
-            onTap: () => loadDemoScenario('message', 'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।'),
+            preview:
+                'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।',
+            onTap: () => loadDemoScenario('message',
+                'অভিনন্দন! আপনি ৫০,০০০ টাকার লটারি জিতেছেন। ফি দিতে টাকা পাঠান।'),
           ),
           _demoScenarioCard(
             icon: Icons.check_circle_outline,
             color: green,
-            title: 'Official Safe Site',
-            tag: 'VERIFIED SAFE',
+            title: 'Official Domain Example',
+            tag: 'DOMAIN EXAMPLE',
             preview: 'https://www.bkash.com',
             onTap: () => loadDemoScenario('url', 'https://www.bkash.com'),
           ),
@@ -927,7 +1036,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             color: green.withValues(alpha: 0.08),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: green.withValues(alpha: 0.35), width: 1.2),
+              side:
+                  BorderSide(color: green.withValues(alpha: 0.35), width: 1.2),
             ),
             child: InkWell(
               borderRadius: BorderRadius.circular(12),
@@ -945,7 +1055,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                             color: green,
                             shape: BoxShape.circle,
                           ),
-                          child: Icon(Icons.smart_toy_outlined, color: Colors.white, size: 20),
+                          child: Icon(Icons.smart_toy_outlined,
+                              color: Colors.white, size: 20),
                         ),
                         SizedBox(width: 12),
                         Expanded(
@@ -953,7 +1064,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                '🤖 সাইবার এআই সহকারী (Live AI Copilot)',
+                                '🤖 সাইবার এআই সহকারী (Safety Assistant)',
                                 style: TextStyle(
                                   fontWeight: FontWeight.w700,
                                   fontSize: 13,
@@ -1004,14 +1115,15 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                 padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Row(
                   children: [
-                    Icon(Icons.crisis_alert, color: Colors.red.shade700, size: 24),
+                    Icon(Icons.crisis_alert,
+                        color: Colors.red.shade700, size: 24),
                     SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '🚨 ইমার্জেন্সি একাউন্ট ফ্রিজ (Panic Freeze)',
+                            'জরুরি প্রতারণা সহায়তা',
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: 13,
@@ -1020,7 +1132,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                           ),
                           SizedBox(height: 2),
                           Text(
-                            'ভুলবশত পিন বা ওটিপি শেয়ার করলে দ্রুত একাউন্ট সাময়িক বন্ধের গাইড ও হটলাইন',
+                            'পিন বা ওটিপি শেয়ার করে থাকলে অফিসিয়াল সহায়তা সেবায় যোগাযোগের নির্দেশনা',
                             style: TextStyle(
                               fontSize: 11,
                               color: Colors.red.shade800,
@@ -1135,7 +1247,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             SizedBox(height: 8),
             Text(
               score >= 50
-                  ? '⚠️ ভুয়া বা প্রতারণামূলক ফাঁদ ধরা পড়েছে!'
+                  ? '⚠️ প্রতারণার একাধিক ঝুঁকির লক্ষণ পাওয়া গেছে'
                   : score >= 25
                       ? '⚡ কিছু সন্দেহজনক বিষয় লক্ষ্য করা গেছে'
                       : '✅ প্রাথমিক পরীক্ষায় বড় কোনো বিপদের লক্ষণ পাওয়া যায়নি',
@@ -1147,22 +1259,22 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             SizedBox(height: 4),
             Text(
               (r['evidence'] as List).any((e) => e['id'] == 'credentials')
-                  ? 'প্রতারকরা আপনার বিকাশ/নগদ/ব্যাংকের গোপন পিন (PIN), ওটিপি বা পাসওয়ার্ড হাতিয়ে নেওয়ার চেষ্টা করছে। কোনো প্রতিষ্ঠান কখনোই আপনার পিন জানতে চায় না।'
-                  : (r['evidence'] as List).any((e) => (e['id'] as String).startsWith('brand:'))
-                      ? 'আসল ওয়েবসাইটের মতো দেখতে নকল ওয়েবসাইট বানিয়ে প্রতারণা করা হচ্ছে। এটি সম্পূর্ণ অননুমোদিত।'
+                  ? 'বার্তায় গোপন পিন (PIN), ওটিপি বা পাসওয়ার্ড চাওয়ার লক্ষণ পাওয়া গেছে। কোনো ব্যক্তিকে এসব তথ্য দেবেন না।'
+                  : (r['evidence'] as List)
+                          .any((e) => (e['id'] as String).startsWith('brand:'))
+                      ? 'ডোমেনে পরিচিত ব্র্যান্ডের মতো নাম পাওয়া গেছে। প্রতিষ্ঠানের অফিসিয়াল অ্যাপ বা ওয়েবসাইটে আলাদাভাবে যাচাই করুন।'
                       : (r['evidence'] as List).any((e) => e['id'] == 'prize')
                           ? 'লটারি বা ফ্রি পুরস্কারের লোভ দেখিয়ে অর্থ বা গোপন পিন হাতিয়ে নেওয়ার প্রতারণার প্যাটার্ন পাওয়া গেছে।'
                           : score >= 50
                               ? 'এই লিংকে ক্লিক করবেন না এবং কোনো তথ্য দেবেন না। এটি আর্থিক ক্ষতির কারণ হতে পারে।'
                               : 'অপ্রত্যাশিত অনুরোধ সতর্কতার সাথে যাচাই করুন এবং কখনোই কারো সাথে ওটিপি শেয়ার করবেন না।',
-              style: TextStyle(fontSize: 12, height: 1.4, color: Colors.black87),
+              style:
+                  TextStyle(fontSize: 12, height: 1.4, color: Colors.black87),
             ),
             SizedBox(height: 8),
             Text('জরুরি হেল্পলাইন: বিকাশ ১৬২৪৭ · নগদ ১৬১৬৭ · পুলিশ ৯৯৯',
                 style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: green)),
+                    fontSize: 11, fontWeight: FontWeight.w600, color: green)),
           ],
         ),
       ),
@@ -1190,17 +1302,6 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
               color: green.withValues(alpha: .10),
               borderRadius: BorderRadius.circular(12)),
           child: Text(r['recommendation'])),
-      for (final c in r['checks'])
-        ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(
-                c['status'] == 'complete'
-                    ? Icons.check_circle_outline
-                    : Icons.info_outline,
-                color: green),
-            title: Text('${c['name']} · ${c['status']}',
-                style: TextStyle(fontSize: 14)),
-            subtitle: Text(c['detail'])),
       _buildAiPipelineFlow(r),
       if (score >= 50) ...[
         Container(
@@ -1233,7 +1334,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
               ),
               SizedBox(height: 5),
               Text(
-                'আর্থিক ক্ষতি এড়াতে ১ সেকেন্ডও দেরি করবেন না। অবিলম্বে হটলাইনে যোগাযোগ করুন অথবা সেলফ-লক প্রোটোকল প্রয়োগ করুন।',
+                'পিন বা ওটিপি দিয়ে থাকলে দ্রুত প্রতিষ্ঠানের অফিসিয়াল সহায়তা সেবায় যোগাযোগ করুন। SafeLink নিজে কোনো অ্যাকাউন্ট লক করতে পারে না।',
                 style: TextStyle(
                     fontSize: 11.5, color: Colors.red.shade900, height: 1.35),
               ),
@@ -1242,7 +1343,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                 width: double.infinity,
                 child: FilledButton.icon(
                   icon: Icon(Icons.shield, size: 16),
-                  label: Text('🚨 জরুরি একাউন্ট ফ্রিজ ও সেলফ-লক প্রোটোকল খুলুন'),
+                  label: Text('🚨 জরুরি সহায়তার নির্দেশনা খুলুন'),
                   style: FilledButton.styleFrom(
                     backgroundColor: Colors.red.shade800,
                     foregroundColor: Colors.white,
@@ -1291,7 +1392,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             foregroundColor: Colors.white,
           ),
           icon: Icon(Icons.crisis_alert, size: 18),
-          label: Text('🚨 জরুরি একাউন্ট ফ্রিজ ও হটলাইন গাইড'),
+          label: Text('🚨 জরুরি সহায়তা ও হটলাইন গাইড'),
           onPressed: showEmergencyFreezeDialog,
         ),
       ],
@@ -1310,9 +1411,9 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
               icon: Icon(Icons.mail_outline),
               label: Text('Email me an alert'),
               onPressed: () => action(() async {
-                    await api.call('/alerts',
+                    final alert = await api.call('/alerts',
                         method: 'POST', body: {'scanId': r['id']});
-                    message('Alert sent.');
+                    message('Alert status: ${alert['status'] ?? 'unknown'}');
                   }))
         ]),
       if (r['persisted'] != true)
@@ -1328,15 +1429,16 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             ? Colors.orange
             : green;
     final id = (r['id'] ?? '').toString();
-    final ref = id.length >= 16 ? id.substring(0, 16).toUpperCase() : id.toUpperCase();
+    final ref =
+        id.length >= 16 ? id.substring(0, 16).toUpperCase() : id.toUpperCase();
     final evidence = (r['evidence'] as List? ?? []);
     final urls = (r['urls'] as List? ?? []).join(', ');
     final phones = (r['phones'] as List? ?? []).join(', ');
 
     final plainReportText = '''
 ==================================================
-SAFELINK AI CYBER DEFENSE LABS
-National Cyber Fraud Assessment & Incident Registry (Bangladesh)
+SAFELINK AI SCAN SUMMARY
+User scan summary (Bangladesh)
 ==================================================
 INCIDENT REF: $ref
 TIMESTAMP: ${DateTime.tryParse(r['createdAt'] ?? '')?.toLocal().toString() ?? DateTime.now().toString()}
@@ -1345,7 +1447,7 @@ RISK INDEX: $score / 100
 VECTOR TYPE: ${r['kind']?.toString().toUpperCase()}
 TARGET: ${r['preview'] ?? urls}
 ${phones.isNotEmpty ? 'IDENTIFIED PHONES/MFS: $phones\n' : ''}
-FORENSIC FINDINGS:
+RISK INDICATORS:
 ${evidence.map((e) => '- [${e['id']}] ${e['title']}: ${e['detail']} (+${e['weight']} pts)').join('\n')}
 
 ${r['aiExplanation'] != null ? 'AI FRAUD INTERPRETATION:\n${r['aiExplanation']}\n\n' : ''}RECOMMENDED ACTION:
@@ -1354,9 +1456,9 @@ ${r['recommendation']}
 EMERGENCY FRAUD HELPLINES (BANGLADESH):
 - bKash Helpline: 16247
 - Nagad Helpline: 16167
-- Bangladesh Police Cyber Support: 01320-000888 / 999
+- Police Cyber Support for Women: 01320-000888; immediate danger: 999
 ==================================================
-Official forensic audit record generated by SafeLink AI.
+Automated risk summary. This is not an official forensic record or proof of a crime.
 ''';
 
     showDialog(
@@ -1385,7 +1487,7 @@ Official forensic audit record generated by SafeLink AI.
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('SAFELINK AI CYBER DEFENSE',
+                        Text('SAFELINK AI SCAN SUMMARY',
                             style: TextStyle(
                                 fontWeight: FontWeight.w800,
                                 fontSize: 13,
@@ -1411,7 +1513,8 @@ Official forensic audit record generated by SafeLink AI.
                         decoration: BoxDecoration(
                           color: color.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: color.withValues(alpha: 0.3)),
+                          border:
+                              Border.all(color: color.withValues(alpha: 0.3)),
                         ),
                         child: Row(
                           children: [
@@ -1473,8 +1576,7 @@ Official forensic audit record generated by SafeLink AI.
                       SizedBox(height: 6),
                       if (evidence.isEmpty)
                         Text('No malicious indicators found.',
-                            style:
-                                TextStyle(fontSize: 12, color: Colors.grey)),
+                            style: TextStyle(fontSize: 12, color: Colors.grey)),
                       for (final e in evidence)
                         Padding(
                           padding: EdgeInsets.symmetric(vertical: 4),
@@ -1537,7 +1639,7 @@ Official forensic audit record generated by SafeLink AI.
                                     color: Colors.grey.shade700)),
                             SizedBox(height: 4),
                             Text(
-                                '• bKash: 16247  |  Nagad: 16167\n• Bangladesh Police Cyber Crime: 01320-000888 / 999',
+                                '• bKash: 16247  |  Nagad: 16167\n• Police Cyber Support for Women: 01320-000888; immediate danger: 999',
                                 style: TextStyle(
                                     fontSize: 11, fontWeight: FontWeight.w600)),
                           ],
@@ -1553,7 +1655,7 @@ Official forensic audit record generated by SafeLink AI.
                   Expanded(
                     child: OutlinedButton.icon(
                       icon: Icon(Icons.copy, size: 16),
-                      label: Text('Copy Official Report'),
+                      label: Text('Copy Scan Summary'),
                       onPressed: () {
                         Clipboard.setData(ClipboardData(text: plainReportText));
                         Navigator.pop(ctx);
@@ -1576,248 +1678,42 @@ Official forensic audit record generated by SafeLink AI.
   }
 
   Widget _buildAiPipelineFlow(Map<String, dynamic> r) {
-    final score = (r['score'] as num).toInt();
-    final List<dynamic> evidence = (r['evidence'] as List<dynamic>? ?? <dynamic>[]);
-    final hasHeuristic = evidence.any((dynamic e) {
-      final id = e is Map ? (e['id']?.toString() ?? '') : '';
-      return id == 'credentials' ||
-          id == 'prize' ||
-          id == 'urgency' ||
-          id.contains('banglish') ||
-          id.contains('keyword') ||
-          id.contains('lottery');
-    });
-    final hasTyposquatting = evidence.any((dynamic e) {
-      final id = e is Map ? (e['id']?.toString() ?? '') : '';
-      return id.startsWith('brand:') ||
-          id == 'lookalike' ||
-          id == 'untrusted_host' ||
-          id == 'ip_host' ||
-          id == 'userinfo' ||
-          id == 'scheme';
-    });
-
-    final stages = [
-      PipelineStageItem(
-        stepNumber: '01',
-        layer: 'Layer 1: Heuristic Engine',
-        title: 'Bangla & Banglish Keyword Scorer',
-        latency: '12ms',
-        status: hasHeuristic ? 'FLAGGED' : 'PASSED',
-        isDanger: hasHeuristic,
-        icon: Icons.memory,
-        detail: hasHeuristic
-            ? 'জরুরি পিন/ওটিপি তলব, ভুয়া লটারি বা একাউন্ট ব্লকের বাংলা/বাংলিশ প্যাটার্ন সনাক্ত।'
-            : 'কোনো সন্দেহজনক বাংলা বা বাংলিশ প্রতারণামূলক কি-ওয়ার্ড পাওয়া যায়নি।',
-      ),
-      PipelineStageItem(
-        stepNumber: '02',
-        layer: 'Layer 2: Typosquatting Analyzer',
-        title: 'Domain Distance & Homoglyphs',
-        latency: '18ms',
-        status: hasTyposquatting ? 'FLAGGED' : 'VERIFIED',
-        isDanger: hasTyposquatting,
-        icon: Icons.hub_outlined,
-        detail: hasTyposquatting
-            ? 'নকল বা অননুমোদিত ডোমেন, ব্র্যান্ড নেম ইনজেকশন বা ক্ষতিকর সাইরিলিক ক্যারেক্টার সনাক্ত।'
-            : 'ডোমেন স্ট্রাকচার ভেরিফাইড ডেটাবেজের সাথে সামঞ্জস্যপূর্ণ অথবা নিরাপদ।',
-      ),
-      PipelineStageItem(
-        stepNumber: '03',
-        layer: 'Layer 3: Semantic NLP Classifier',
-        title: 'Contextual Fraud Sentiment Model',
-        latency: '45ms',
-        status: score >= 50
-            ? 'HIGH RISK'
-            : score >= 25
-                ? 'SUSPICIOUS'
-                : 'LOW RISK',
-        isDanger: score >= 50,
-        icon: Icons.psychology_outlined,
-        detail: r['aiExplanation'] != null
-            ? r['aiExplanation'].toString()
-            : score >= 50
-                ? 'আর্থিক সোস্যাল ইঞ্জিনিয়ারিং ও গ্রাহককে বিভ্রান্ত করার প্রতারণামূলক কৌশল সক্রিয়।'
-                : 'স্বাভাবিক ও নিরাপদ যোগাযোগের কনটেক্সট পাওয়া গেছে।',
-      ),
-      PipelineStageItem(
-        stepNumber: '04',
-        layer: 'Layer 4: Threat Intelligence',
-        title: 'Reputation & Blocklist Correlator',
-        latency: '10ms',
-        status: score >= 50 ? 'CORRELATED' : 'SYNCHRONIZED',
-        isDanger: score >= 50,
-        icon: Icons.security,
-        detail:
-            'জাতীয় এমএফএস ডেটাবেজ, বিটিআরসি গাইডলাইন এবং সিকিউরিটি তালিকার সাথে সিনক্রোনাইজড।',
-      ),
-    ];
-
+    final checks = (r['checks'] as List?) ?? [];
     return Container(
       margin: EdgeInsets.symmetric(vertical: 14),
       padding: EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: green.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: green.withValues(alpha: 0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: green.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(Icons.bolt, color: green, size: 18),
-              ),
-              SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '4-STAGE MULTI-LAYER AI PIPELINE',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        color: green,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    Text(
-                      'রিয়েল-টাইম চার স্তরের এআই সিকিউরিটি ও হেউরিস্টিক অডিট',
-                      style: TextStyle(fontSize: 11, color: Colors.black87),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                decoration: BoxDecoration(
-                  color: green.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: green.withValues(alpha: 0.4)),
-                ),
-                child: Text(
-                  '⏱️ 85ms Latency',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: green,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: 12),
-          for (final s in stages)
-            Container(
-              margin: EdgeInsets.only(bottom: 8),
-              padding: EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: s.isDanger
-                      ? Colors.red.withValues(alpha: 0.35)
-                      : green.withValues(alpha: 0.2),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        '#${s.stepNumber}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey.shade600,
-                        ),
-                      ),
-                      SizedBox(width: 6),
-                      Icon(s.icon,
-                          size: 14,
-                          color: s.isDanger ? Colors.red : green),
-                      SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          s.title,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.black87,
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding:
-                            EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: s.isDanger
-                              ? Colors.red.shade50
-                              : Colors.green.shade50,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          s.status,
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            color: s.isDanger
-                                ? Colors.red.shade800
-                                : Colors.green.shade800,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    s.detail,
-                    style: TextStyle(fontSize: 11, color: Colors.black54),
-                  ),
-                  SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '⏱️ ${s.latency}',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade700,
-                        ),
-                      ),
-                      Text(
-                        '✓ AI Engine Verified',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: green,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
+          color: green.withValues(alpha: .05),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: green.withValues(alpha: .3))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Checks performed for this scan',
+            style: TextStyle(fontWeight: FontWeight.bold, color: green)),
+        SizedBox(height: 6),
+        Text(
+            'Only the checks reported by the server are shown. Skipped or unavailable checks do not confirm safety.',
+            style: TextStyle(fontSize: 12)),
+        for (final check in checks)
+          ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                  check['status'] == 'complete'
+                      ? Icons.check_circle_outline
+                      : Icons.info_outline,
+                  color: green),
+              title: Text('${check['name']} · ${check['status']}'),
+              subtitle: Text(check['detail']?.toString() ?? '')),
+      ]),
     );
   }
 
   void showPoliceGdDialog(Map<String, dynamic> r) {
-    final score = (r['score'] as num).toInt();
+    final score = (r['score'] as num?)?.toInt();
     final id = (r['id'] ?? '').toString();
     final ref =
         'SL-GD-${id.length >= 8 ? id.substring(0, 8).toUpperCase() : id.toUpperCase()}';
-    final List<dynamic> evidence = (r['evidence'] as List<dynamic>? ?? <dynamic>[]);
+    final List<dynamic> evidence =
+        (r['evidence'] as List<dynamic>? ?? <dynamic>[]);
     final urls = (r['urls'] as List<dynamic>? ?? <dynamic>[]).join(', ');
     final phones = (r['phones'] as List<dynamic>? ?? <dynamic>[]).join(', ');
     final preview = (r['preview'] ?? urls).toString();
@@ -1827,24 +1723,24 @@ Official forensic audit record generated by SafeLink AI.
     final gdDraftText = '''
 বরাবর,
 অফিসার ইনচার্জ / সাইবার ক্রাইম ইনভেস্টিগেশন ইউনিট
-[নিকটস্থ থানা / সিআইডি সাইবার পুলিশ সেন্টার, ঢাকা]
+[নিকটস্থ থানা]
 
 বিষয়: অনলাইন ফিশিং / আর্থিক প্রতারণার ফাঁদ সংক্রান্ত সাধারণ ডায়েরি (GD) ও আইনগত তদন্তের আবেদন।
 
 মহোদয়,
-বিনীত নিবেদন এই যে, আমি নিম্নস্বাক্ষরকারী একজন সচেতন নাগরিক। সম্প্রতি আমি একটি পরিকল্পিত ডিজিটাল আর্থিক প্রতারণার শিকার হতে যাচ্ছিলাম / সাইবার সিকিউরিটি থ্রেট শনাক্ত করেছি। 'SafeLink AI' এর সাইবার ফরেনসিক ইঞ্জিন দ্বারা উক্ত সাইবার অপরাধমূলক প্রচেষ্টাটি শনাক্ত ও বিশ্লেষণ করা হয়েছে।
+আমি অনলাইনে একটি সন্দেহজনক বার্তা/লিংক পেয়েছি। আমার নিজের দেখা ঘটনার বিবরণ নিচে লিখেছি। SafeLink-এর স্বয়ংক্রিয় স্ক্যান কিছু ঝুঁকির লক্ষণ দেখিয়েছে; এটি অপরাধের প্রমাণ বা অফিসিয়াল ফরেনসিক রিপোর্ট নয়।
 
 ঘটনা ও ডিজিটাল আলামতের বিবরণ:
 ১. ইনসিডেন্ট ট্র্যাকিং আইডি: $ref
-২. ঝুঁকি মাত্রা (Risk Score): $score/100 (${r['level']?.toString().toUpperCase()} - ${r['threatType']})
+২. স্ক্যান সারাংশ: ${score == null ? 'স্ক্যান করা হয়নি' : '$score/100'} (${r['level'] ?? 'প্রযোজ্য নয়'})
 ৩. সন্দেহভাজন ফিশিং লিংক / বার্তা: $preview
 ${phones.isNotEmpty ? '৪. চিহ্নিত সন্দেহভাজন ফোন/MFS নম্বর: $phones\n' : ''}৫. সময় ও তারিখ: ${DateTime.tryParse(r['createdAt'] ?? '')?.toLocal().toString() ?? dateStr}
-৬. এআই ও ফরেনসিক প্রমাণের তালিকা:
+৬. স্বয়ংক্রিয় স্ক্যানের ঝুঁকির লক্ষণ:
 ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : e.toString()}').join('\n')}
 
-উক্ত মেসেজ/লিংকের মাধ্যমে বিকাশ, নগদ বা ব্যাংক গ্রাহকদের বিভ্রান্ত করে গোপন পিন (PIN), ওটিপি (OTP) বা অর্থ আত্মসাতের চক্রান্ত করা হচ্ছিল। 
+আমার নিজের দেখা ঘটনার বিবরণ: [কি ঘটেছে, কবে ঘটেছে, লেনদেন হলে তার পরিমাণ ও রেফারেন্স লিখুন। কোনো পিন/ওটিপি লিখবেন না।]
 
-অতএব, মহোদয়ের নিকট বিনীত প্রার্থনা, ভবিষ্যতের আইনি নিরাপত্তা ও প্রতারক চক্রের বিরুদ্ধে সাইবার নিরাপত্তা আইন এবং বিটিআরসি নির্দেশিকা অনুযায়ী ব্যবস্থা গ্রহণের লক্ষ্যে উক্ত বিবরণটি সাধারণ ডায়েরি (GD) হিসেবে অন্তর্ভুক্ত করতে মর্জি হয়।
+ঘটনাটি যাচাই করে প্রযোজ্য প্রক্রিয়া ও প্রয়োজনীয় পরবর্তী পদক্ষেপ সম্পর্কে আমাকে সাহায্য করার অনুরোধ করছি।
 
 বিনীত নিবেদনকারী,
 নাম: ___________________________
@@ -1854,7 +1750,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
 তারিখ: $dateStr
 
 সংযুক্তি:
-১. SafeLink AI সাইবার থ্রেট ফরেনসিক রিপোর্ট ($ref)
+১. SafeLink স্বয়ংক্রিয় স্ক্যান সারাংশ ($ref)
 ২. সন্দেহভাজন মেসেজ/লিংকের স্ক্রিনশট ও প্রমাণাদি
 ''';
 
@@ -1905,7 +1801,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                           ),
                         ),
                         Text(
-                          'থানা, বিটিআরসি বা সাইবার পুলিশে দেওয়ার প্রস্তুত বাংলা দরখাস্ত',
+                          'নিজের দেখা তথ্য যাচাই ও সম্পাদনার জন্য খসড়া',
                           style: TextStyle(fontSize: 11, color: Colors.black54),
                         ),
                       ],
@@ -1928,14 +1824,15 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline,
-                      size: 18, color: green),
+                  Icon(Icons.info_outline, size: 18, color: green),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'ড্রাফটটি কপি করে থানা বা সাইবার পুলিশ (০১৩২০-০০০৮৮৮) অথবা বিটিআরসি (১০০) নম্বরে অভিযোগ করতে পারেন।',
-                      style:
-                          TextStyle(fontSize: 11, color: Color(0xFF0F3D30), fontWeight: FontWeight.w500),
+                      'এটি সম্পাদনাযোগ্য খসড়া। নিজের দেখা তথ্য যাচাই করে পূরণ করুন এবং প্রযোজ্য জমাদান পদ্ধতি স্থানীয় থানায় জেনে নিন। SafeLink কোনো অভিযোগ জমা দেয় না।',
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF0F3D30),
+                          fontWeight: FontWeight.w500),
                     ),
                   ),
                 ],
@@ -2015,25 +1912,11 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
         icon: Icons.account_balance,
       ),
       EmergencyContactItem(
-        name: 'Upay (উপায়)',
-        hotline: '16268',
-        desc: 'ইউসিবি ফিনটেক উপায় হেল্পলাইন',
-        color: Color(0xff005696),
-        icon: Icons.payment,
-      ),
-      EmergencyContactItem(
         name: 'জাতীয় জরুরি সেবা (999)',
         hotline: '999',
-        desc: 'বাংলাদেশ পুলিশ সাইবার ইমার্জেন্সি ডেস্ক',
+        desc: 'তাৎক্ষণিক বিপদ বা জরুরি সহায়তা',
         color: Color(0xffd32f2f),
         icon: Icons.local_police,
-      ),
-      EmergencyContactItem(
-        name: 'বিটিআরসি সাইবার ডেস্ক (100)',
-        hotline: '100',
-        desc: 'টেলিকম প্রতারণা ও সিম ফ্রড রিপোর্ট',
-        color: Color(0xff0288d1),
-        icon: Icons.headset_mic,
       ),
     ];
 
@@ -2080,14 +1963,14 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '🚨 জরুরি একাউন্ট ফ্রিজ ও সেলফ-লক প্রোটোকল',
+                          '🚨 জরুরি প্রতারণা সহায়তা',
                           style: TextStyle(
                               fontSize: 17,
                               fontWeight: FontWeight.bold,
                               color: Colors.red.shade900),
                         ),
                         Text(
-                          'Emergency Fraud Account Lock & Protocol',
+                          'Support contacts and recovery guidance',
                           style: TextStyle(
                               fontSize: 11, color: Colors.grey.shade700),
                         ),
@@ -2146,7 +2029,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                     ),
                   ),
                   SizedBox(height: 16),
-                  Text('ধাপ ১: সরাসরি হেল্পলাইনে কল দিন (ট্যাপ করলেই কল হবে)',
+                  Text('ধাপ ১: অফিসিয়াল হেল্পলাইন (ডায়ালার বা নম্বর কপি)',
                       style: TextStyle(
                           fontSize: 13.5, fontWeight: FontWeight.bold)),
                   SizedBox(height: 8),
@@ -2215,7 +2098,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                             SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'ধাপ ২: তাত্ক্ষণিক সেলফ-লক কৌশল (Instant Self-Lock)',
+                                'ধাপ ২: প্রতিষ্ঠানের নির্দেশনা অনুসরণ করুন',
                                 style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13,
@@ -2226,13 +2109,13 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                         ),
                         SizedBox(height: 6),
                         Text(
-                          'কাস্টমার কেয়ারের লাইনে দীর্ঘ সিরিয়াল বা ব্যস্ত থাকলে নিজের বিকাশ/নগদ অ্যাপে গিয়ে ইচ্ছাকৃতভাবে পর পর ৩ বার ভুল পিন (PIN) দিন।',
+                          'অফিসিয়াল অ্যাপ বা ওয়েবসাইট থেকে পিন পরিবর্তন/অ্যাকাউন্ট রিকভারি পদ্ধতি দেখুন। সহায়তা সেবাকে সন্দেহজনক লেনদেন ও অ্যাকাউন্ট সুরক্ষার বিষয়ে জানান।',
                           style: TextStyle(
                               fontSize: 12, height: 1.4, color: Colors.black87),
                         ),
                         SizedBox(height: 4),
                         Text(
-                          '⚡ ফলাফল: অ্যাপের সিকিউরিটি সিস্টেম অ্যাকাউন্টটিকে সাথে সাথে সাময়িক লক করবে, ফলে প্রতারক অন্য প্রান্তে লগইন থাকা সত্ত্বেও কোনো ক্যাশআউট বা সেন্ড মানি করতে পারবে না!',
+                          'SafeLink অ্যাকাউন্ট ফ্রিজ বা লেনদেন বন্ধ করতে পারে না। ইচ্ছাকৃতভাবে ভুল পিন দিলে টাকা সুরক্ষিত হবে—এমন নিশ্চয়তা নেই।',
                           style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.bold,
@@ -2259,7 +2142,9 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                         Text(
                           agentScriptText,
                           style: TextStyle(
-                              fontSize: 12, height: 1.45, color: Colors.black87),
+                              fontSize: 12,
+                              height: 1.45,
+                              color: Colors.black87),
                         ),
                         SizedBox(height: 8),
                         Align(
@@ -2320,10 +2205,10 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
         text.contains('ওটিপি')) {
       return {
         'reply':
-            '🚫 জরুরি নিরাপত্তা সতর্কতা: কাউকে কখনো পিন (PIN) বা ওটিপি (OTP) দেবেন না!\n\n• বিকাশ/নগদ কখনোই গ্রাহককে কল দিয়ে ওটিপি বা পিন নম্বর জানতে চায় না।\n• একাউন্ট সাময়িক লক করতে অ্যাপে পর পর ৩ বার ভুল পিন দিন অথবা হেল্পলাইনে কল দিন।',
+            '🚫 জরুরি নিরাপত্তা সতর্কতা: কাউকে কখনো পিন (PIN) বা ওটিপি (OTP) দেবেন না!\n\n• বিকাশ/নগদ কখনোই গ্রাহককে কল দিয়ে ওটিপি বা পিন নম্বর জানতে চায় না।\n• অফিসিয়াল সহায়তা সেবায় যোগাযোগ করুন এবং তাদের অ্যাকাউন্ট সুরক্ষার নির্দেশনা অনুসরণ করুন। SafeLink অ্যাকাউন্ট লক করতে পারে না।',
         'suggestions': [
           'বিকাশ একাউন্ট ফ্রিজ করব কীভাবে?',
-          '৩ বার ভুল পিন দেওয়ার সেলফ-লক কৌশল কি?',
+          'অফিসিয়াল সহায়তা সেবায় কী বলব?',
           'টাকা খোয়া গেলে জিডি করব কীভাবে?',
         ],
         'hotlines': [
@@ -2339,13 +2224,13 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
         text.contains('whatsapp')) {
       return {
         'reply':
-            '🛡️ একাউন্ট হ্যাক হলে দ্রুত করণীয়:\n\n১. অবিলম্বে facebook.com/hacked লিংকে যান এবং একাউন্ট রিকভার করুন।\n২. বন্ধুদের সতর্ক করুন যেন কেউ টাকা না পাঠায়।\n৩. সাইবার পুলিশ সেন্টারে (০১৩২০০০০৮৮৮) রিপোর্ট করুন।',
+            '🛡️ একাউন্ট হ্যাক হলে দ্রুত করণীয়:\n\n১. অবিলম্বে facebook.com/hacked লিংকে যান এবং একাউন্ট রিকভার করুন।\n২. বন্ধুদের সতর্ক করুন যেন কেউ টাকা না পাঠায়।\n৩. প্রয়োজন হলে স্থানীয় থানায় যোগাযোগ করুন। নারী ভুক্তভোগীদের জন্য Police Cyber Support for Women: ০১৩২০০০০৮৮৮।',
         'suggestions': [
           'ব্ল্যাকমেইল করলে কীভাবে থানায় জিডি করব?',
           'টু-ফ্যাক্টর অথেনটিকেশন কীভাবে চালু করব?',
         ],
         'hotlines': [
-          {'name': 'সিআইডি সাইবার পুলিশ', 'number': '01320000888'},
+          {'name': 'Police Cyber Support for Women', 'number': '01320000888'},
           {'name': 'জরুরি সেবা ৯৯৯', 'number': '999'},
         ],
       };
@@ -2355,10 +2240,10 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
         text.contains('scam')) {
       return {
         'reply':
-            '⚡ টাকা খোয়া গেলে প্রথম ৩০ মিনিটে করণীয়:\n\n১. দ্রুত বিকাশ (১৬২৪৭) বা নগদে (১৬১৬৭) কল দিয়ে প্রতারকের একাউন্ট ক্যাশআউট হোল্ড করান।\n২. ট্রানজেকশন আইডি ও প্রমাণ নিয়ে নিকটস্থ থানায় সাইবার ক্রাইম জিডি দায়ের করুন।',
+            'টাকা খোয়া গেলে দ্রুত করণীয়:\n\n১. দ্রুত বিকাশ (১৬২৪৭) বা নগদে (১৬১৬৭) কল দিয়ে সন্দেহজনক লেনদেন রিপোর্ট করুন এবং কী ব্যবস্থা সম্ভব জেনে নিন। টাকা ফেরত পাওয়ার নিশ্চয়তা নেই।\n২. ট্রানজেকশন আইডি ও প্রমাণ নিয়ে নিকটস্থ থানায় সাইবার ক্রাইম জিডি দায়ের করুন।',
         'suggestions': [
           'SafeLink থেকে ১-ক্লিক পুলিশ জিডি বানাব কীভাবে?',
-          'বিটিআরসি ১০০ হেল্পলাইনে অভিযোগের নিয়ম কি?',
+          'লেনদেনের প্রমাণ কীভাবে সংরক্ষণ করব?',
         ],
         'hotlines': [
           {'name': 'বিকাশ হেল্পলাইন', 'number': '16247'},
@@ -2377,657 +2262,59 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
       'hotlines': [
         {'name': 'জরুরি পুলিশ', 'number': '999'},
         {'name': 'বিকাশ হেল্পলাইন', 'number': '16247'},
-        {'name': 'বিটিআরসি', 'number': '100'},
       ],
     };
   }
 
   void showCyberAssistantBottomSheet([String? initialPrompt]) {
-    final chatMessages = <Map<String, dynamic>>[
-      {
-        'id': 'welcome',
-        'role': 'assistant',
-        'text':
-            '👋 নমস্কার! আমি SafeLink সাইবার এআই সহকারী (Cyber Copilot)।\n\nঅনলাইন সাইবার নিরাপত্তা, ওটিপি/পিন প্রতারণা প্রতিরোধ, ফেসবুক একাউন্ট উদ্ধার এবং পুলিশি জিডি সংক্রান্ত যেকোনো সহায়তায় আমি প্রস্তুত।\n\nনিচের বিষয়ে ট্যাপ করুন অথবা আপনার প্রশ্ন লিখুন:',
-        'time': 'এখন',
-        'suggestions': [
-          'বিকাশ/নগদ পিন কেউ চাইলে কি করব?',
-          'আমার একাউন্ট হ্যাক হলে দ্রুত কি করব?',
-          'সাইবার ক্রাইম জিডি করার নিয়ম কি?',
-          'টাকা খোয়া গেলে উদ্ধারের উপায় কি?',
-        ],
-        'hotlines': [
-          {'name': 'জাতীয় জরুরি সেবা', 'number': '999'},
-          {'name': 'বিকাশ হেল্পলাইন', 'number': '16247'},
-          {'name': 'বিটিআরসি কমপ্লেইন', 'number': '100'},
-        ],
-      }
-    ];
-
     showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        final textController = TextEditingController();
-        final scrollController = ScrollController();
-        bool isTyping = false;
-        bool initialSent = false;
-
-        return StatefulBuilder(
-          builder: (bottomSheetContext, setModalState) {
-            void scrollToBottom() {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (scrollController.hasClients) {
-                  scrollController.animateTo(
-                    scrollController.position.maxScrollExtent,
-                    duration: Duration(milliseconds: 250),
-                    curve: Curves.easeOut,
-                  );
-                }
-              });
-            }
-
-            Future<void> sendUserMessage([String? preset]) async {
-              final query = (preset ?? textController.text).trim();
-              if (query.isEmpty || isTyping) return;
-
-              setModalState(() {
-                chatMessages.add({
-                  'id': 'u_${DateTime.now().millisecondsSinceEpoch}',
-                  'role': 'user',
-                  'text': query,
-                  'time': 'এখন',
-                });
-                if (preset == null) textController.clear();
-                isTyping = true;
-              });
-              scrollToBottom();
-
-              try {
-                final history = chatMessages
-                    .sublist(chatMessages.length > 4 ? chatMessages.length - 4 : 0)
-                    .map((m) => {'role': m['role'], 'content': m['text']})
-                    .toList();
-
-                final res = await api.call(
-                  '/assistant',
-                  method: 'POST',
-                  body: {'message': query, 'history': history},
-                );
-
-                if (res is Map && res['reply'] != null) {
-                  setModalState(() {
-                    chatMessages.add({
-                      'id': 'b_${DateTime.now().millisecondsSinceEpoch}',
-                      'role': 'assistant',
-                      'text': res['reply'],
-                      'time': 'এখন',
-                      'suggestions': (res['suggestions'] as List?)
-                          ?.map((dynamic s) => s.toString())
-                          .toList(),
-                      'hotlines': (res['hotlines'] as List?)
-                          ?.map((dynamic h) => h is Map ? h : {})
-                          .toList(),
-                    });
-                    isTyping = false;
-                  });
-                  scrollToBottom();
-                  return;
-                }
-              } catch (_) {}
-
-              final fallback = _getOfflineCyberAdvice(query);
-              setModalState(() {
-                chatMessages.add({
-                  'id': 'b_${DateTime.now().millisecondsSinceEpoch}',
-                  'role': 'assistant',
-                  'text': fallback['reply'],
-                  'time': 'এখন',
-                  'suggestions': fallback['suggestions'],
-                  'hotlines': fallback['hotlines'],
-                });
-                isTyping = false;
-              });
-              scrollToBottom();
-            }
-
-            if (initialPrompt != null && !initialSent) {
-              initialSent = true;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                sendUserMessage(initialPrompt);
-              });
-            }
-
-            final isDark = Theme.of(context).brightness == Brightness.dark;
-            final sheetBg = isDark ? Color(0xFF0F1C24) : Colors.white;
-
-            return Container(
-              height: MediaQuery.of(context).size.height * 0.88,
-              decoration: BoxDecoration(
-                color: sheetBg,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                border: Border(top: BorderSide(color: green.withValues(alpha: 0.35), width: 1.5)),
-              ),
-              child: Column(
-                children: [
-                  Container(
-                    margin: EdgeInsets.only(top: 10, bottom: 6),
-                    width: 44,
-                    height: 4.5,
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.white24 : Colors.black12,
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          backgroundColor: green,
-                          radius: 18,
-                          child: Icon(Icons.smart_toy_outlined,
-                              color: Colors.white, size: 20),
-                        ),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'SafeLink সাইবার এআই সহকারী',
-                                style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold,
-                                    color: isDark ? Colors.white : Color(0xFF10212C)),
-                              ),
-                              Text(
-                                'Cyber Safety Copilot · Mistral AI Powered · ২৪/৭ সক্রিয়',
-                                style: TextStyle(
-                                    fontSize: 11, color: isDark ? Color(0xFFA7F3D0) : green),
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.close),
-                          onPressed: () => Navigator.pop(ctx),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12),
-                  Expanded(
-                    child: ListView.builder(
-                      controller: scrollController,
-                      padding: EdgeInsets.all(14),
-                      itemCount: chatMessages.length,
-                      itemBuilder: (_, idx) {
-                        final msg = chatMessages[idx];
-                        final isUser = msg['role'] == 'user';
-                        final hotlines = (msg['hotlines'] as List?) ?? [];
-
-                        return Padding(
-                          padding: EdgeInsets.symmetric(vertical: 6),
-                          child: Row(
-                            mainAxisAlignment: isUser
-                                ? MainAxisAlignment.end
-                                : MainAxisAlignment.start,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (!isUser) ...[
-                                CircleAvatar(
-                                  radius: 14,
-                                  backgroundColor: green.withValues(alpha: 0.15),
-                                  child: Icon(Icons.smart_toy_outlined,
-                                      size: 15, color: green),
-                                ),
-                                SizedBox(width: 8),
-                              ],
-                              Flexible(
-                                child: Container(
-                                  padding: EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 10),
-                                  decoration: BoxDecoration(
-                                    color: isUser
-                                        ? green
-                                        : (isDark
-                                            ? Color(0xFF142430)
-                                            : Color(0xFFF1F5F9)),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: isUser
-                                        ? null
-                                        : Border.all(
-                                            color: isDark
-                                                ? green.withValues(alpha: 0.25)
-                                                : Colors.black12),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        msg['text'] ?? '',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          height: 1.45,
-                                          color: isUser
-                                              ? Colors.white
-                                              : (isDark
-                                                  ? Colors.white
-                                                  : Colors.black87),
-                                        ),
-                                      ),
-                                      if (hotlines.isNotEmpty) ...[
-                                        SizedBox(height: 8),
-                                        Wrap(
-                                          spacing: 6,
-                                          runSpacing: 6,
-                                          children: hotlines.map((dynamic h) {
-                                            final name = h['name'] ?? 'Hotline';
-                                            final num = h['number'] ?? '';
-                                            return ActionChip(
-                                              visualDensity:
-                                                  VisualDensity.compact,
-                                              backgroundColor: green.withValues(alpha: 0.12),
-                                              side: BorderSide(color: green.withValues(alpha: 0.3)),
-                                              avatar: Icon(Icons.phone_in_talk,
-                                                  size: 13,
-                                                  color: green),
-                                              label: Text('$name: $num',
-                                                  style: TextStyle(
-                                                      fontSize: 11,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: green)),
-                                              onPressed: () =>
-                                                  _dialPhone(num.toString()),
-                                            );
-                                          }).toList(),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  if (isTyping)
-                    Padding(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: green),
-                          ),
-                          SizedBox(width: 8),
-                          Text('এআই সহকারী পরামর্শ বিশ্লেষণ করছে…',
-                              style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: Colors.grey.shade600)),
-                        ],
-                      ),
-                    ),
-                  if (chatMessages.isNotEmpty &&
-                      chatMessages.last['suggestions'] != null)
-                    Container(
-                      height: 42,
-                      padding: EdgeInsets.symmetric(horizontal: 10),
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: (chatMessages.last['suggestions'] as List)
-                            .map((dynamic s) {
-                          return Padding(
-                            padding: EdgeInsets.only(right: 6),
-                            child: ActionChip(
-                              visualDensity: VisualDensity.compact,
-                              backgroundColor: green.withValues(alpha: 0.08),
-                              side: BorderSide(color: green.withValues(alpha: 0.25)),
-                              avatar: Icon(Icons.auto_awesome,
-                                  size: 13, color: green),
-                              label: Text(s.toString(),
-                                  style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: green)),
-                              onPressed: () =>
-                                  sendUserMessage(s.toString()),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  Divider(height: 1, color: isDark ? Colors.white12 : Colors.black12),
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(
-                        14,
-                        8,
-                        14,
-                        16 +
-                            MediaQuery.of(bottomSheetContext)
-                                .viewInsets
-                                .bottom),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: textController,
-                            decoration: InputDecoration(
-                              hintText: 'সাইবার সমস্যা বা প্রশ্ন লিখুন…',
-                              hintStyle: TextStyle(fontSize: 13),
-                              contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 10),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(20),
-                                borderSide: BorderSide(color: green, width: 1.5),
-                              ),
-                            ),
-                            onSubmitted: (_) => sendUserMessage(),
-                          ),
-                        ),
-                        SizedBox(width: 8),
-                        IconButton.filled(
-                          style: IconButton.styleFrom(
-                            backgroundColor: green,
-                            foregroundColor: Colors.white,
-                          ),
-                          icon: Icon(Icons.send, size: 18),
-                          onPressed: () => sendUserMessage(),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => CyberAssistantSheet(
+            api: api,
+            onDial: _dialPhone,
+            onUnauthorized: _clearAccount,
+            localAdvice: _getOfflineCyberAdvice,
+            initialPrompt: initialPrompt));
   }
 
   List<Widget> threatRadarPage() => [
-        title('National Cyber Threat Radar'),
+        title('Scam awareness'),
         Text(
-            'Live MFS & Financial Fraud Intelligence across Bangladesh digital channels.'),
+            'Common patterns to check for. These examples are educational; they are not national incident statistics or a live threat feed.'),
         SizedBox(height: 18),
-        Container(
-          padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: green.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: green.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: green,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'LIVE DEFENSE SYNCHRONIZED · BANGLADESH REGION',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: green,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(height: 16),
-        panel(
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.query_stats, color: Colors.deepOrange, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'National Attack Vector Distribution',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 4),
-              Text(
-                'Top fraudulent vectors targeting Bangladeshi citizens (2025-2026)',
-                style: TextStyle(fontSize: 12, color: Colors.black54),
-              ),
-              SizedBox(height: 16),
-              _vectorRow('MFS & Banking Impersonation (bKash/Nagad)', 0.42,
-                  '42%', Colors.red),
-              SizedBox(height: 12),
-              _vectorRow('Fake Prize & Lottery Social Traps', 0.26, '26%',
-                  Colors.deepOrange),
-              SizedBox(height: 12),
-              _vectorRow('OTP & Password Harvesting Pages', 0.18, '18%',
-                  Colors.amber.shade800),
-              SizedBox(height: 12),
-              _vectorRow('Unverified Job & Visa Offers', 0.14, '14%',
-                  Colors.indigo),
-            ],
-          ),
-        ),
-        SizedBox(height: 16),
-        panel(
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.security, color: green, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'High-Targeted Financial Brands Matrix',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 4),
-              Text(
-                'Active protection coverage by SafeLink Homograph & Typo Engine',
-                style: TextStyle(fontSize: 12, color: Colors.black54),
-              ),
-              SizedBox(height: 14),
-              _brandRow('bKash Limited', '94% Attack Target Index', 'Critical',
-                  Colors.red),
-              Divider(height: 16),
-              _brandRow('Nagad Postal MFS', '88% Attack Target Index', 'High',
-                  Colors.deepOrange),
-              Divider(height: 16),
-              _brandRow('Brac Bank / Astha', '76% Attack Target Index',
-                  'Caution', Colors.orange),
-              Divider(height: 16),
-              _brandRow('Islami Bank Cellfin', '71% Attack Target Index',
-                  'Caution', Colors.orange),
-            ],
-          ),
-        ),
-        SizedBox(height: 16),
-        panel(
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.layers_outlined, color: green, size: 20),
-                  SizedBox(width: 8),
-                  Text(
-                    'Multi-Layer Defense Architecture',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-                ],
-              ),
-              SizedBox(height: 14),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  _metricChip('4-Layer Pipeline', 'Deterministic Edge Filter'),
-                  _metricChip('Levenshtein Matrix', 'Homograph Typo Defense'),
-                  _metricChip('Mistral AI Engine', 'Bangla/Banglish Context'),
-                  _metricChip('Zero-SSRF Policy', 'Safe Sandboxed Execution'),
-                ],
-              ),
-              SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  icon: Icon(Icons.play_arrow, size: 18),
-                  label: Text('Test Live Simulation in Scanner'),
-                  onPressed: () {
-                    loadDemoScenario(
-                      'message',
-                      'Apnar bKash account bondho! Ekhoni https://bkash-verify.example e PIN din.',
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
+        panel(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.password, color: Colors.red),
+              title: Text('PIN and OTP requests'),
+              subtitle: Text(
+                  'Do not share account secrets with anyone who contacts you.')),
+          ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.link, color: Colors.orange),
+              title: Text('Lookalike domains'),
+              subtitle: Text(
+                  'A familiar brand name in a URL does not prove that the site belongs to that brand.')),
+          ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.card_giftcard, color: Colors.orange),
+              title: Text('Prize fees and urgent payments'),
+              subtitle: Text(
+                  'Verify unexpected offers independently before sending money.')),
+        ])),
+        panel(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          title('How scans work'),
+          Text(
+              'The server checks message patterns and domain structure. Optional external checks report their own availability. A risk score is an indicator, not an accuracy estimate.'),
+          SizedBox(height: 14),
+          FilledButton.icon(
+              icon: Icon(Icons.play_arrow),
+              label: Text('Try a scam message example'),
+              onPressed: () => loadDemoScenario('message',
+                  'Apnar bKash account bondho! Ekhoni https://bkash-verify.example e PIN din.')),
+        ])),
       ];
-
-  Widget _vectorRow(
-          String name, double progress, String pct, Color barColor) =>
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(name,
-                    style:
-                        TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-              ),
-              Text(pct,
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: barColor)),
-            ],
-          ),
-          SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 8,
-              backgroundColor: barColor.withValues(alpha: 0.15),
-              valueColor: AlwaysStoppedAnimation<Color>(barColor),
-            ),
-          ),
-        ],
-      );
-
-  Widget _brandRow(
-          String name, String sub, String riskLevel, Color badgeColor) =>
-      Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name,
-                    style:
-                        TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                SizedBox(height: 2),
-                Text(sub,
-                    style: TextStyle(fontSize: 11, color: Colors.black54)),
-              ],
-            ),
-          ),
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: badgeColor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: badgeColor.withValues(alpha: 0.4)),
-            ),
-            child: Text(
-              riskLevel,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: badgeColor,
-              ),
-            ),
-          ),
-          SizedBox(width: 8),
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: green.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: green.withValues(alpha: 0.4)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.check, size: 12, color: green),
-                SizedBox(width: 3),
-                Text(
-                  'Protected',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: green,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      );
-
-  Widget _metricChip(String title, String subtitle) => Container(
-        constraints: BoxConstraints(minWidth: 135, maxWidth: 175),
-        padding: EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.03),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.black12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title,
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-            SizedBox(height: 2),
-            Text(subtitle,
-                style: TextStyle(fontSize: 10, color: Colors.black54)),
-          ],
-        ),
-      );
 
   void loadDemoScenario(String scenarioKind, String scenarioText) {
     setState(() {
@@ -3100,19 +2387,20 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                           child: Icon(icon, size: 18, color: color),
                         ),
                         SizedBox(width: 8),
-                        Text(
-                          title,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF10212C),
+                        Flexible(
+                          child: Text(
+                            title,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF10212C),
+                            ),
                           ),
                         ),
                       ],
                     ),
                     Container(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      padding: EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                       decoration: BoxDecoration(
                         color: color.withValues(alpha: 0.16),
                         borderRadius: BorderRadius.circular(6),
@@ -3131,8 +2419,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                 SizedBox(height: 8),
                 Container(
                   width: double.infinity,
-                  padding:
-                      EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                   decoration: BoxDecoration(
                     color: Color(0xFFF8FAFC),
                     borderRadius: BorderRadius.circular(6),
@@ -3150,20 +2437,25 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                   ),
                 ),
                 SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
                   children: [
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.bolt, size: 14, color: color),
                         SizedBox(width: 3),
-                        Text(
-                          '১-ট্যাপ অটো-স্ক্যান',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey.shade600,
+                        Flexible(
+                          child: Text(
+                            '১-ট্যাপ অটো-স্ক্যান',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey.shade600,
+                            ),
                           ),
                         ),
                       ],
@@ -3171,16 +2463,19 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          'Test Scenario',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: color,
+                        Flexible(
+                          child: Text(
+                            'Test Scenario',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: color,
+                            ),
                           ),
                         ),
                         SizedBox(width: 2),
-                        Icon(Icons.arrow_forward_rounded, size: 14, color: color),
+                        Icon(Icons.arrow_forward_rounded,
+                            size: 14, color: color),
                       ],
                     ),
                   ],
@@ -3193,598 +2488,113 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
 
   void showNotificationsDialog() {
     showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => SafeArea(
-          child: Padding(
-            padding: EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.notifications_active, color: green, size: 22),
-                        SizedBox(width: 8),
+        context: context,
+        isScrollControlled: true,
+        builder: (ctx) => SafeArea(
+            child: ConstrainedBox(
+                constraints: BoxConstraints(
+                    maxHeight: MediaQuery.sizeOf(ctx).height * .8),
+                child: ListView(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.all(20),
+                    children: [
+                      title('Security alert deliveries'),
+                      Text(
+                          'Alerts are sent only when you request an email. Background push notifications and a national threat feed are not available.'),
+                      SizedBox(height: 14),
+                      if (user == null)
+                        Text('Sign in to view your email alert records.')
+                      else if (alerts.isEmpty)
                         Text(
-                          'Cyber Threat Alerts',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (unreadNotifications > 0)
-                      TextButton(
-                        onPressed: () {
-                          setState(() => unreadNotifications = 0);
-                          setModalState(() => unreadNotifications = 0);
-                          message('All notifications marked as read.');
-                        },
-                        child: Text('Mark all read'),
-                      ),
-                  ],
-                ),
-                SizedBox(height: 10),
-                Text(
-                  'Real-time alerts for Bangladesh digital financial and mobile channels:',
-                  style: TextStyle(fontSize: 12, color: Colors.black54),
-                ),
-                SizedBox(height: 14),
-                _notificationTile(
-                  title: 'High Alert: bKash Phishing Wave',
-                  time: 'Just now',
-                  body:
-                      'Multiple deceptive domains detected attempting to harvest bKash PINs. SafeLink heuristic engine active.',
-                  severityColor: Colors.red,
-                  isNew: unreadNotifications > 0,
-                ),
-                _notificationTile(
-                  title: 'Advisory: Bangla Lottery Traps',
-                  time: '3 hours ago',
-                  body:
-                      'SMS scam circulating promising 50,000 BDT cash rewards. Do not dial codes or forward to family.',
-                  severityColor: Colors.orange,
-                  isNew: unreadNotifications > 1,
-                ),
-                _notificationTile(
-                  title: 'Engine Update: 2026 Homographs',
-                  time: 'Yesterday',
-                  body:
-                      'Detection database refreshed with Cyrillic look-alikes targeting Bangladeshi commercial banks.',
-                  severityColor: green,
-                  isNew: unreadNotifications > 2,
-                ),
-                _notificationTile(
-                  title: 'Family Shield Guard Active',
-                  time: '2 days ago',
-                  body:
-                      'Your personal circle is protected. Any risky forwarded link triggers immediate red warning.',
-                  severityColor: green,
-                  isNew: false,
-                ),
-                Divider(height: 24),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: Text('Push notifications for critical MFS attacks',
-                      style: TextStyle(fontSize: 13)),
-                  value: scamAlertsEnabled,
-                  onChanged: (v) {
-                    setState(() => scamAlertsEnabled = v);
-                    setModalState(() => scamAlertsEnabled = v);
-                  },
-                ),
-                SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: Text('Close'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+                            'No alert records loaded. Open Family to refresh your records.'),
+                      for (final alert in alerts.reversed.take(20))
+                        ListTile(
+                            leading: Icon(Icons.mail_outline, color: green),
+                            title: Text(alert['status']?.toString() ??
+                                'Unknown status'),
+                            subtitle:
+                                Text(alert['createdAt']?.toString() ?? '')),
+                      SizedBox(height: 12),
+                      FilledButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: Text('Close')),
+                    ]))));
   }
 
-  Widget _notificationTile({
-    required String title,
-    required String time,
-    required String body,
-    required Color severityColor,
-    required bool isNew,
-  }) =>
-      Container(
-        margin: EdgeInsets.only(bottom: 10),
-        padding: EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: severityColor.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: severityColor.withValues(alpha: isNew ? 0.4 : 0.15),
-            width: isNew ? 1.4 : 1,
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: severityColor,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    SizedBox(width: 6),
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Colors.black87,
-                      ),
-                    ),
-                  ],
-                ),
-                Text(
-                  time,
-                  style: TextStyle(fontSize: 11, color: Colors.black54),
-                ),
-              ],
-            ),
-            SizedBox(height: 4),
-            Text(
-              body,
-              style: TextStyle(fontSize: 12, height: 1.35, color: Colors.black87),
-            ),
-          ],
-        ),
-      );
-
   void showOfflineDirectoryDialog() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        String filterQuery = '';
-        int selectedTab = 0;
-
-        const helplines = [
-          HelplineItem(
-            name: 'bKash Limited',
-            bengali: 'বিকাশ লিমিটেড',
-            hotline: '16247',
-            shortcode: '*247#',
-            domain: 'bkash.com',
-            tag: 'Critical MFS',
-            color: Colors.pink,
-            desc: 'বিকাশ কখনোই ফোন দিয়ে পিন বা ওটিপি জানতে চায় না।',
-          ),
-          HelplineItem(
-            name: 'Nagad (Postal MFS)',
-            bengali: 'নগদ (ডাক বিভাগ)',
-            hotline: '16167',
-            shortcode: '*167#',
-            domain: 'nagad.com.bd',
-            tag: 'Critical MFS',
-            color: Colors.deepOrange,
-            desc: 'শুধুমাত্র নিজের সিম থেকে *167# ডায়াল করুন। পিন কাউকে দেবেন না।',
-          ),
-          HelplineItem(
-            name: 'Rocket (DBBL MFS)',
-            bengali: 'রকেট (ডাচ-বাংলা ব্যাংক)',
-            hotline: '16216',
-            shortcode: '*322#',
-            domain: 'dutchbanglabank.com/rocket',
-            tag: 'MFS Hotlist',
-            color: Colors.purple,
-            desc: 'মোবাইল হারিয়ে গেলে তাৎক্ষণিক ব্যালেন্স ফ্রিজ করতে 16216 ডায়াল করুন।',
-          ),
-          HelplineItem(
-            name: 'Upay (UCB Fintech)',
-            bengali: 'উপায় (ইউসিবি)',
-            hotline: '16268',
-            shortcode: '*268#',
-            domain: 'upaybd.com',
-            tag: 'MFS Hotlist',
-            color: Colors.blue,
-            desc: 'ইউনাইটেড কমার্শিয়াল ব্যাংক এমএফএস সার্বক্ষণিক সহায়তা লাইন।',
-          ),
-          HelplineItem(
-            name: 'National Emergency (Police/Fire)',
-            bengali: 'জাতীয় জরুরি সেবা ৯৯৯',
-            hotline: '999',
-            shortcode: '999 (টোল ফ্রি)',
-            domain: 'police.gov.bd',
-            tag: '24/7 Police Dispatch',
-            color: Colors.red,
-            desc: 'সাইবার চাঁদাবাজি, ব্ল্যাকমেইল ও তাৎক্ষণিক পুলিশি সহায়তায় টোল ফ্রি কল দিন।',
-          ),
-          HelplineItem(
-            name: 'CID Cyber Crime Unit',
-            bengali: 'সিআইডি সাইবার পুলিশ সেন্টার',
-            hotline: '01320000888',
-            shortcode: '01320-000888',
-            domain: 'cid.police.gov.bd',
-            tag: 'Cyber Crime Police',
-            color: Colors.indigo,
-            desc: 'বাংলাদেশ পুলিশ সাইবার অপরাধ তদন্ত বিভাগ। ইমেইল: smmcpc-cid@police.gov.bd',
-          ),
-          HelplineItem(
-            name: 'BTRC Call & Fraud Desk',
-            bengali: 'বিটিআরসি সাইবার অভিযোগ',
-            hotline: '100',
-            shortcode: '100 (টোল ফ্রি)',
-            domain: 'btrc.gov.bd',
-            tag: 'Telecom Regulator',
-            color: Colors.teal,
-            desc: 'ভুয়া কলার আইডি, অবৈধ ভিওআইপি ও প্রতারণামূলক এসএমএস রিপোর্ট করতে কল দিন।',
-          ),
-          HelplineItem(
-            name: 'BRAC Bank (Astha App)',
-            bengali: 'ব্র্যাক ব্যাংক হটলাইন',
-            hotline: '16221',
-            shortcode: '+88028801221',
-            domain: 'bracbank.com',
-            tag: 'Commercial Bank',
-            color: Colors.blueGrey,
-            desc: 'কার্ড ব্লক ও আস্থা অ্যাপের অননুমোদিত লেনদেন রিপোর্ট ডেস্ক।',
-          ),
-          HelplineItem(
-            name: 'Islami Bank (Cellfin Desk)',
-            bengali: 'ইসলামী ব্যাংক হটলাইন',
-            hotline: '16259',
-            shortcode: '+88028331090',
-            domain: 'islamibankbd.com',
-            tag: 'Commercial Bank',
-            color: Colors.green,
-            desc: 'সেলফিন প্রতারণা ও এটিএম কার্ড জরুরি স্থগিত করার হটলাইন।',
-          ),
-        ];
-
-        final goldenRules = [
-          {
-            'title': '১. পিন (PIN) ও ওটিপি (OTP) কখনোই কারো নয়',
-            'desc':
-                'কোনো ব্যাংক, বিকাশ বা সরকারি কর্মকর্তা কখনোই আপনার গোপন পিন বা ওটিপি জানতে চাইবে না। কেউ পিন চাইলেই বুঝবেন সে ১০০% প্রতারক।',
-          },
-          {
-            'title': '২. "ভুল করে টাকা চলে গেছে" নাটকে সতর্ক থাকুন',
-            'desc':
-                'কেউ ফোন করে টাকা ফেরত চাইলে কখনো সরাসরি টাকা পাঠাবেন না। আগে নিজের ফোনের অফিশিয়াল অ্যাপ বা কোড ডায়াল করে মূল ব্যালেন্স যাচাই করুন।',
-          },
-          {
-            'title': '৩. লটারি বা চাকরির ফি ফাঁদ',
-            'desc':
-                'আসল কোনো লটারি বা সরকারি/বেসরকারি চাকরির ক্ষেত্রে পুরস্কার নেওয়ার জন্য আগে টাকা বা বিকাশ ফি পাঠাতে হয় না।',
-          },
-          {
-            'title': '৪. অপরিচিত লিংকে পাসওয়ার্ড না দেওয়া',
-            'desc':
-                'মেসেজে আসা অচেনা লিংকে ক্লিক করে বিকাশ, নগদ বা ব্যাংকের পিন/পাসওয়ার্ড লিখবেন না। সবসময় অফিশিয়াল অ্যাপ ও ডোমেন ব্যবহার করুন।',
-          },
-          {
-            'title': '৫. সন্দেহ হলেই তাৎক্ষণিক কল দিয়ে ব্লক করুন',
-            'desc':
-                'কোনো প্রতারণামূলক লেনদেনের সন্দেহ হলে দেরি না করে সরাসরি অফিশিয়াল হটলাইনে (যেমন বিকাশ ১৬২৪৭ বা নগদ ১৬১৬৭) কল দিয়ে অ্যাকাউন্ট সাময়িক স্থগিত করুন।',
-          },
-        ];
-
-        return StatefulBuilder(
-          builder: (ctx, setModalState) {
-            final filtered = helplines.where((h) {
-              final q = filterQuery.toLowerCase().trim();
-              if (q.isEmpty) return true;
-              return h.name.toLowerCase().contains(q) ||
-                  h.bengali.contains(q) ||
-                  h.hotline.contains(q) ||
-                  h.domain.toLowerCase().contains(q);
-            }).toList();
-
-            return DraggableScrollableSheet(
-              initialChildSize: 0.85,
-              maxChildSize: 0.95,
-              minChildSize: 0.5,
-              expand: false,
-              builder: (ctx, scrollController) => Padding(
-                padding: EdgeInsets.fromLTRB(20, 12, 20, 20),
-                child: ListView(
-                  controller: scrollController,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.black26,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Icon(Icons.menu_book, color: green, size: 22),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'অফলাইন সাইবার সেফটি ডিরেক্টরি',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding:
-                              EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: green.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            'OFFLINE 100%',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: green,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'ইন্টারনেট সংযোগ ছাড়াই বিকাশ, নগদ, পুলিশ ও ব্যাংকের ভেরিফাইড নম্বর ও প্রতারণা এড়ানোর গাইড:',
-                      style: TextStyle(fontSize: 12, color: Colors.black54),
-                    ),
-                    SizedBox(height: 14),
-                    SegmentedButton<int>(
-                      showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment<int>(
-                          value: 0,
-                          label: Text('জরুরি হটলাইন'),
-                          icon: Icon(Icons.call, size: 16),
-                        ),
-                        ButtonSegment<int>(
-                          value: 1,
-                          label: Text('৫টি গোল্ডেন রুলস'),
-                          icon: Icon(Icons.security, size: 16),
-                        ),
-                      ],
-                      selected: {selectedTab},
-                      onSelectionChanged: (s) =>
-                          setModalState(() => selectedTab = s.first),
-                    ),
-                    SizedBox(height: 14),
-                    if (selectedTab == 0) ...[
-                      TextField(
-                        decoration: InputDecoration(
-                          prefixIcon: Icon(Icons.search, size: 20),
-                          hintText: 'প্রতিষ্ঠান, হটলাইন বা ডোমেন সার্চ করুন…',
-                          isDense: true,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                        onChanged: (v) =>
-                            setModalState(() => filterQuery = v),
-                      ),
-                      SizedBox(height: 12),
-                      for (final h in filtered)
-                        Card(
-                          elevation: 0,
-                          margin: EdgeInsets.only(bottom: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            side: BorderSide(
-                              color: h.color.withValues(alpha: 0.3),
-                              width: 1.2,
-                            ),
-                          ),
-                          color: h.color.withValues(alpha: 0.04),
-                          child: Padding(
-                            padding: EdgeInsets.all(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            h.name,
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 14,
-                                            ),
-                                          ),
-                                          Text(
-                                            h.bengali,
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              color: Colors.black54,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Container(
-                                      padding: EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: h.color.withValues(alpha: 0.15),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text(
-                                        h.tag,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w700,
-                                          color: h.color,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                SizedBox(height: 6),
-                                Text(
-                                  h.desc,
-                                  style: TextStyle(
-                                      fontSize: 12, height: 1.35),
-                                ),
-                                SizedBox(height: 8),
-                                Container(
-                                  padding: EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                        color: Colors.black12),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.phone,
-                                          size: 14, color: green),
-                                      SizedBox(width: 6),
-                                      Text(
-                                        'হটলাইন: ${h.hotline}',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                          color: green,
-                                        ),
-                                      ),
-                                      Spacer(),
-                                      Text(
-                                        'কোড: ${h.shortcode}',
-                                        style: TextStyle(
-                                          fontFamily: 'monospace',
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                SizedBox(height: 8),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Icon(Icons.check_circle,
-                                            size: 13, color: green),
-                                        SizedBox(width: 4),
-                                        Text(
-                                          h.domain,
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontFamily: 'monospace',
-                                            color: Colors.black87,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    FilledButton.tonalIcon(
-                                      icon: Icon(Icons.copy, size: 14),
-                                      label: Text('Copy Number'),
-                                      style: FilledButton.styleFrom(
-                                        visualDensity: VisualDensity.compact,
-                                        padding: EdgeInsets.symmetric(
-                                            horizontal: 10, vertical: 4),
-                                      ),
-                                      onPressed: () {
-                                        Clipboard.setData(ClipboardData(
-                                            text: h.hotline));
-                                        Navigator.pop(ctx);
-                                        message(
-                                            'Copied ${h.hotline} (${h.name}) to clipboard.');
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                    ],
-                    if (selectedTab == 1) ...[
-                      for (final r in goldenRules)
-                        Container(
-                          margin: EdgeInsets.only(bottom: 12),
-                          padding: EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: green.withValues(alpha: 0.06),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                                color: green.withValues(alpha: 0.3)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                r['title']!,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                  color: Colors.black87,
-                                ),
-                              ),
-                              SizedBox(height: 4),
-                              Text(
-                                r['desc']!,
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    height: 1.4,
-                                    color: Colors.black87),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                    SizedBox(height: 14),
-                    OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: Text('Close Directory'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
+    const entries = [
+      {
+        'name': 'bKash',
+        'number': '16247',
+        'note': 'Account support',
+        'source': 'https://www.bkash.com/en/page/terms-of-use-bkash-app'
       },
-    );
+      {
+        'name': 'Nagad',
+        'number': '16167',
+        'note': 'Account support',
+        'source': 'https://nagadislamic.com.bd/bn/terms-and-conditions/'
+      },
+      {
+        'name': 'Dutch-Bangla Bank / Rocket',
+        'number': '16216',
+        'note': 'Account support',
+        'source':
+            'https://www.dutchbanglabank.com/complaint-cell/central-customer-services.html'
+      },
+      {
+        'name': 'Police Cyber Support for Women',
+        'number': '01320000888',
+        'note': 'For women affected by cybercrime',
+        'source': 'https://www.police.gov.bd/en/police_cyber_support_for_women'
+      },
+      {
+        'name': 'Emergency services',
+        'number': '999',
+        'note': 'Immediate danger or emergency',
+        'source': 'https://telecom-police.portal.gov.bd'
+      },
+    ];
+    showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        builder: (ctx) => SafeArea(
+            child: SizedBox(
+                height: MediaQuery.sizeOf(ctx).height * .8,
+                child: ListView(padding: EdgeInsets.all(20), children: [
+                  title('Saved support directory'),
+                  Text(
+                      'This guide is stored in the app and can be read offline. Scans require the server. Contacts checked 4 October 2026; confirm current details on the official website.'),
+                  SizedBox(height: 14),
+                  for (final entry in entries)
+                    Card(
+                        child: Padding(
+                            padding: EdgeInsets.all(14),
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(entry['name']!,
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold)),
+                                  Text(entry['note']!),
+                                  SizedBox(height: 4),
+                                  SelectableText(entry['source']!,
+                                      style: TextStyle(fontSize: 11)),
+                                  TextButton.icon(
+                                      icon: Icon(Icons.phone_outlined),
+                                      onPressed: () =>
+                                          _dialPhone(entry['number']!),
+                                      label: Text(
+                                          'Dial / copy ${entry['number']}')),
+                                ]))),
+                  SizedBox(height: 12),
+                  Text(
+                      'পিন বা ওটিপি কাউকে দেবেন না। সন্দেহজনক লেনদেনের রেফারেন্স ও স্ক্রিনশট রাখুন। SafeLink অ্যাকাউন্ট লক, টাকা উদ্ধার বা অভিযোগ জমা দিতে পারে না।'),
+                  SizedBox(height: 12),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: Text('Close')),
+                ]))));
   }
 
   Widget signInPanel() => panel(Column(children: [
@@ -3828,6 +2638,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                     tooltip: 'Delete scan',
                     icon: Icon(Icons.delete_outline),
                     onPressed: () async {
+                      final revision = api.sessionRevision;
                       final confirmed = await showDialog<bool>(
                           context: context,
                           builder: (c) => AlertDialog(
@@ -3842,7 +2653,9 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                                         onPressed: () => Navigator.pop(c, true),
                                         child: Text('Delete'))
                                   ]));
-                      if (confirmed == true) {
+                      if (confirmed == true &&
+                          mounted &&
+                          revision == api.sessionRevision) {
                         await action(() async {
                           await api.call('/scans/${r['id']}', method: 'DELETE');
                         });
@@ -3854,45 +2667,21 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
         ]
       ];
   Future<void> addContact() async {
-    final name = TextEditingController(), email = TextEditingController();
-    final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (c) => AlertDialog(
-                title: Text('Add trusted contact'),
-                content: Column(mainAxisSize: MainAxisSize.min, children: [
-                  TextField(
-                      controller: name,
-                      decoration: InputDecoration(labelText: 'Name')),
-                  SizedBox(height: 12),
-                  TextField(
-                      controller: email,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: InputDecoration(labelText: 'Email')),
-                  SizedBox(height: 12),
-                  Text('Only add someone who agrees to receive your alerts.',
-                      style: TextStyle(fontSize: 12))
-                ]),
-                actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(c, false),
-                      child: Text('Cancel')),
-                  TextButton(
-                      onPressed: () => Navigator.pop(c, true),
-                      child: Text('Add'))
-                ]));
-    if (confirmed == true) {
+    if (busy || user == null || !mounted) return;
+    final revision = api.sessionRevision;
+    final contact = await showDialog<Map<String, String>>(
+        context: context, builder: (_) => const TrustedContactDialog());
+    if (contact != null && mounted && revision == api.sessionRevision) {
       await action(() async {
-        await api.call('/contacts',
-            method: 'POST',
-            body: {'name': name.text.trim(), 'email': email.text.trim()});
+        await api.call('/contacts', method: 'POST', body: contact);
       });
       await loadAccountData();
     }
-    name.dispose();
-    email.dispose();
   }
 
   Future<void> alertContact(dynamic contact) async {
+    if (busy || user == null || !mounted) return;
+    final revision = api.sessionRevision;
     if (history.isEmpty) {
       message('Save a scan first.');
       return;
@@ -3909,12 +2698,12 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                     subtitle: Text(scan['createdAt']),
                     onTap: () => Navigator.pop(c, scan['id']))
             ])));
-    if (selected == null) return;
+    if (selected == null || !mounted || revision != api.sessionRevision) return;
     await action(() async {
-      await api.call('/alerts',
+      final alert = await api.call('/alerts',
           method: 'POST',
           body: {'scanId': selected, 'contactId': contact['id']});
-      message('Security alert sent.');
+      message('Alert status: ${alert['status'] ?? 'unknown'}');
     });
     await loadAccountData();
   }
@@ -3998,14 +2787,10 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                   child: Text('Send verification email')),
             TextButton(
                 onPressed: () => action(() async {
-                      await api.logout();
-                      if (mounted) {
-                        setState(() {
-                          user = null;
-                          history = [];
-                          contacts = [];
-                          alerts = [];
-                        });
+                      try {
+                        await api.logout();
+                      } finally {
+                        _clearAccount();
                       }
                     }),
                 child: Text('Sign out'))
@@ -4022,10 +2807,296 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
         ])),
         panel(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           title('Privacy & protection'),
+          SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('Clipboard suggestions'),
+              subtitle: Text(
+                  'Read your clipboard when you return to SafeLink. Off by default; manual paste always works.'),
+              value: clipboardSuggestionsEnabled,
+              onChanged: (value) => setState(() {
+                    clipboardSuggestionsEnabled = value;
+                    if (!value) _showClipboardBanner = false;
+                  })),
           Text(
               'Images are processed in memory. Raw message and OCR text are not saved in history. External checks are optional and send content to configured providers. Remove sensitive information before scanning.\n\nA low score is not a guarantee of safety. We do not visit suspicious links or follow redirects.\n\nUse the website for community reports and the full threat dashboard.')
         ]))
       ];
+}
+
+class CyberAssistantSheet extends StatefulWidget {
+  final SafeLinkApi api;
+  final Future<void> Function(String) onDial;
+  final Map<String, dynamic> Function(String) localAdvice;
+  final String? initialPrompt;
+  final VoidCallback? onUnauthorized;
+  const CyberAssistantSheet(
+      {super.key,
+      required this.api,
+      required this.onDial,
+      required this.localAdvice,
+      this.onUnauthorized,
+      this.initialPrompt});
+  @override
+  State<CyberAssistantSheet> createState() => _CyberAssistantSheetState();
+}
+
+class _CyberAssistantSheetState extends State<CyberAssistantSheet> {
+  final textController = TextEditingController();
+  final scrollController = ScrollController();
+  final messages = <Map<String, dynamic>>[
+    {
+      'role': 'assistant',
+      'text':
+          'অনলাইন নিরাপত্তা বিষয়ে সাধারণ পরামর্শ দিতে পারি। পিন, ওটিপি বা পাসওয়ার্ড লিখবেন না। SafeLink অ্যাকাউন্ট ফ্রিজ বা অভিযোগ জমা দেয় না।',
+      'source': 'local',
+      'suggestions': [
+        'বিকাশ/নগদ পিন কেউ চাইলে কি করব?',
+        'আমার একাউন্ট হ্যাক হলে কি করব?'
+      ],
+    }
+  ];
+  bool external = false;
+  bool sending = false;
+  String? inputError;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialPrompt != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) send(widget.initialPrompt);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    textController.dispose();
+    scrollController.dispose();
+    super.dispose();
+  }
+
+  void scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && scrollController.hasClients) {
+        scrollController.animateTo(scrollController.position.maxScrollExtent,
+            duration: Duration(milliseconds: 200), curve: Curves.easeOut);
+      }
+    });
+  }
+
+  Future<void> send([String? preset]) async {
+    final query = (preset ?? textController.text).trim();
+    if (query.isEmpty || sending || !mounted) return;
+    if (query.length > 3000) {
+      setState(() => inputError = 'Keep the question within 3000 characters.');
+      return;
+    }
+    final history = messages.skip(1).toList();
+    final recent = history
+        .skip(history.length > 4 ? history.length - 4 : 0)
+        .map((m) => {'role': m['role'], 'content': m['text']})
+        .toList();
+    setState(() {
+      messages.add({'role': 'user', 'text': query});
+      sending = true;
+      inputError = null;
+      textController.clear();
+    });
+    scrollToBottom();
+    Map<String, dynamic> reply;
+    try {
+      final data = await widget.api.call('/assistant',
+          method: 'POST',
+          body: {'message': query, 'history': recent, 'external': external});
+      reply = normalizeReply(data);
+    } catch (error) {
+      if (error is ApiException && error.statusCode == 401) {
+        widget.onUnauthorized?.call();
+      }
+      reply = normalizeReply(
+          {...widget.localAdvice(query), 'source': 'local', 'offline': true});
+    }
+    if (!mounted) return;
+    setState(() {
+      messages.add({...reply, 'role': 'assistant', 'text': reply['reply']});
+      sending = false;
+    });
+    scrollToBottom();
+  }
+
+  Map<String, dynamic> normalizeReply(dynamic data) {
+    if (data is! Map ||
+        data['reply'] is! String ||
+        (data['reply'] as String).trim().isEmpty) {
+      throw const ApiException('Unexpected assistant response.');
+    }
+    return {
+      'reply': data['reply'],
+      'source': data['source'] == 'ai' ? 'ai' : 'local',
+      'externalUsed': data['externalUsed'] == true,
+      'offline': data['offline'] == true,
+      'suggestions': data['suggestions'] is List
+          ? (data['suggestions'] as List)
+              .whereType<String>()
+              .where((s) => s.trim().isNotEmpty && s.length <= 3000)
+              .take(8)
+              .toList()
+          : <String>[],
+      'hotlines': data['hotlines'] is List
+          ? (data['hotlines'] as List)
+              .where((h) =>
+                  h is Map &&
+                  h['name'] is String &&
+                  h['number'] is String &&
+                  RegExp(r'^\+?\d{3,16}$').hasMatch(h['number'] as String))
+              .take(8)
+              .toList()
+          : <Map<String, dynamic>>[],
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return SafeArea(
+        child: Padding(
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(context).bottom),
+            child: SizedBox(
+              height: MediaQuery.sizeOf(context).height * .88,
+              child: Column(children: [
+                Expanded(
+                    child: ListView(controller: scrollController, children: [
+                  Padding(
+                      padding: EdgeInsets.fromLTRB(16, 12, 8, 0),
+                      child: Row(children: [
+                        Icon(Icons.smart_toy_outlined, color: green),
+                        SizedBox(width: 10),
+                        Expanded(
+                            child: Text('সাইবার নিরাপত্তা সহকারী',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16))),
+                        IconButton(
+                            onPressed: () => Navigator.pop(context),
+                            tooltip: 'Close assistant',
+                            icon: Icon(Icons.close)),
+                      ])),
+                  SwitchListTile(
+                      dense: true,
+                      title: Text('Optional external AI'),
+                      subtitle: Text(
+                          'On: your question and recent chat are sent to the configured AI provider. Off: local guidance.'),
+                      value: external,
+                      onChanged: sending
+                          ? null
+                          : (value) => setState(() => external = value)),
+                  Divider(height: 1),
+                  for (final msg in messages)
+                    Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 14),
+                        child: Builder(builder: (_) {
+                          final isUser = msg['role'] == 'user';
+                          final hotlines = (msg['hotlines'] as List?) ?? [];
+                          return Align(
+                              alignment: isUser
+                                  ? Alignment.centerRight
+                                  : Alignment.centerLeft,
+                              child: Container(
+                                margin: EdgeInsets.symmetric(vertical: 6),
+                                padding: EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                    color: isUser
+                                        ? colors.primaryContainer
+                                        : colors.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(14)),
+                                child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (!isUser)
+                                        Text(
+                                            msg['source'] == 'ai'
+                                                ? 'External AI · may be wrong'
+                                                : msg['externalUsed'] == true
+                                                    ? 'External AI attempted · local guidance shown'
+                                                    : msg['offline'] == true
+                                                        ? 'Offline local guidance'
+                                                        : 'Local safety guidance',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color:
+                                                    colors.onSurfaceVariant)),
+                                      SizedBox(height: 4),
+                                      SelectableText(
+                                          msg['text']?.toString() ?? '',
+                                          style: TextStyle(
+                                              fontSize: 13, height: 1.45)),
+                                      if (hotlines.isNotEmpty)
+                                        Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            children: [
+                                              for (final hotline in hotlines)
+                                                if (hotline is Map)
+                                                  ActionChip(
+                                                      avatar: Icon(
+                                                          Icons.phone_outlined,
+                                                          size: 16),
+                                                      label: Text(
+                                                          '${hotline['name']}: ${hotline['number']}'),
+                                                      onPressed: () =>
+                                                          widget.onDial(hotline[
+                                                                      'number']
+                                                                  ?.toString() ??
+                                                              '')),
+                                            ]),
+                                    ]),
+                              ));
+                        })),
+                ])),
+                if (sending) LinearProgressIndicator(),
+                if ((messages.last['suggestions'] as List?)?.isNotEmpty == true)
+                  SizedBox(
+                      height: 30 + MediaQuery.textScalerOf(context).scale(16),
+                      child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          children: [
+                            for (final suggestion
+                                in messages.last['suggestions'] as List)
+                              Padding(
+                                  padding: EdgeInsets.only(right: 6),
+                                  child: ActionChip(
+                                      label: Text(suggestion.toString()),
+                                      onPressed: sending
+                                          ? null
+                                          : () => send(suggestion.toString()))),
+                          ])),
+                Padding(
+                    padding: EdgeInsets.fromLTRB(14, 8, 14, 12),
+                    child: Row(children: [
+                      Expanded(
+                          child: TextField(
+                              controller: textController,
+                              maxLength: 3000,
+                              maxLines: 2,
+                              minLines: 1,
+                              decoration: InputDecoration(
+                                  hintText: 'প্রশ্ন লিখুন…',
+                                  counterText: '',
+                                  errorText: inputError),
+                              onSubmitted: (_) => send())),
+                      SizedBox(width: 8),
+                      IconButton.filled(
+                          tooltip: 'Send question',
+                          onPressed: sending ? null : () => send(),
+                          icon: Icon(Icons.send)),
+                    ])),
+              ]),
+            )));
+  }
 }
 
 class QrCamera extends StatefulWidget {
@@ -4061,11 +3132,10 @@ class _QrCameraState extends State<QrCamera> {
                             'Camera unavailable. Allow camera access in settings, or use QR image upload.'))),
                 onDetect: (capture) {
                   if (done) return;
-                  final values =
-                      capture.barcodes.where((b) => b.rawValue != null);
+                  final values = capture.barcodes
+                      .where((b) => b.rawValue?.trim().isNotEmpty == true);
                   if (values.isEmpty) return;
                   done = true;
-                  controller.stop();
                   Navigator.pop(context, values.first.rawValue);
                 }))
       ]));
@@ -4110,6 +3180,8 @@ class _AuthPageState extends State<AuthPage> {
                           if (register) ...[
                             TextFormField(
                                 controller: name,
+                                enabled: !busy,
+                                maxLength: 80,
                                 decoration: InputDecoration(labelText: 'Name'),
                                 validator: (s) => (s?.trim().length ?? 0) < 2
                                     ? 'Enter your name.'
@@ -4118,6 +3190,7 @@ class _AuthPageState extends State<AuthPage> {
                           ],
                           TextFormField(
                               controller: email,
+                              enabled: !busy,
                               keyboardType: TextInputType.emailAddress,
                               autofillHints: const [AutofillHints.email],
                               decoration: InputDecoration(labelText: 'Email'),
@@ -4127,6 +3200,8 @@ class _AuthPageState extends State<AuthPage> {
                           SizedBox(height: 18),
                           TextFormField(
                               controller: password,
+                              enabled: !busy,
+                              maxLength: 128,
                               obscureText: true,
                               decoration:
                                   InputDecoration(labelText: 'Password'),
@@ -4157,7 +3232,12 @@ class _AuthPageState extends State<AuthPage> {
                                                 register ? 'register' : 'login',
                                                 email.text.trim(),
                                                 password.text,
-                                                name.text.trim());
+                                                name.text.trim(),
+                                                isActive: () =>
+                                                    mounted &&
+                                                    ModalRoute.of(context)
+                                                            ?.isCurrent ==
+                                                        true);
                                         if (context.mounted) {
                                           Navigator.pop(context, user);
                                         }
@@ -4181,32 +3261,111 @@ class _AuthPageState extends State<AuthPage> {
                                           ? 'Create account'
                                           : 'Sign in'))),
                           TextButton(
-                              onPressed: () => setState(() {
-                                    register = !register;
-                                    error = null;
-                                  }),
+                              onPressed: busy
+                                  ? null
+                                  : () => setState(() {
+                                        register = !register;
+                                        error = null;
+                                      }),
                               child: Text(register
                                   ? 'Already have an account? Sign in'
                                   : 'Create an account')),
                           TextButton(
-                              onPressed: () async {
-                                try {
-                                  final data = await widget.api.call(
-                                      '/auth/forgot',
-                                      method: 'POST',
-                                      body: {'email': email.text.trim()});
-                                  if (mounted) {
-                                    setState(() => error = data['message']);
-                                  }
-                                } catch (e) {
-                                  if (mounted) {
-                                    setState(() => error = e.toString());
-                                  }
-                                }
-                              },
+                              onPressed: busy
+                                  ? null
+                                  : () async {
+                                      setState(() {
+                                        busy = true;
+                                        error = null;
+                                      });
+                                      try {
+                                        final data = await widget.api.call(
+                                            '/auth/forgot',
+                                            method: 'POST',
+                                            body: {'email': email.text.trim()});
+                                        if (mounted) {
+                                          if (data is! Map ||
+                                              data['message'] is! String) {
+                                            throw const ApiException(
+                                                'Unexpected password reset response.');
+                                          }
+                                          setState(
+                                              () => error = data['message']);
+                                        }
+                                      } catch (e) {
+                                        if (mounted) {
+                                          setState(() => error = e.toString());
+                                        }
+                                      } finally {
+                                        if (mounted) {
+                                          setState(() => busy = false);
+                                        }
+                                      }
+                                    },
                               child: Text('Send password reset email'))
                         ]))
               ]))));
+}
+
+class TrustedContactDialog extends StatefulWidget {
+  const TrustedContactDialog({super.key});
+  @override
+  State<TrustedContactDialog> createState() => _TrustedContactDialogState();
+}
+
+class _TrustedContactDialogState extends State<TrustedContactDialog> {
+  final form = GlobalKey<FormState>();
+  final name = TextEditingController(), email = TextEditingController();
+
+  @override
+  void dispose() {
+    name.dispose();
+    email.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+          scrollable: true,
+          title: Text('Add trusted contact'),
+          content: Form(
+              key: form,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextFormField(
+                    controller: name,
+                    maxLength: 80,
+                    decoration: InputDecoration(labelText: 'Name'),
+                    validator: (value) => (value?.trim().length ?? 0) < 2 ||
+                            (value?.trim().length ?? 0) > 80
+                        ? 'Use 2–80 characters.'
+                        : null),
+                SizedBox(height: 12),
+                TextFormField(
+                    controller: email,
+                    maxLength: 254,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: InputDecoration(labelText: 'Email'),
+                    validator: (value) => RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+                                .hasMatch(value?.trim() ?? '') &&
+                            (value?.trim().length ?? 0) <= 254
+                        ? null
+                        : 'Enter a valid email.'),
+                SizedBox(height: 12),
+                Text('Only add someone who agrees to receive your alerts.',
+                    style: TextStyle(fontSize: 12)),
+              ])),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context), child: Text('Cancel')),
+            TextButton(
+                onPressed: () {
+                  if (form.currentState!.validate()) {
+                    Navigator.pop(context,
+                        {'name': name.text.trim(), 'email': email.text.trim()});
+                  }
+                },
+                child: Text('Add')),
+          ]);
 }
 
 class ServerDialog extends StatefulWidget {
@@ -4232,6 +3391,7 @@ class _ServerDialogState extends State<ServerDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text('Server Settings'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
