@@ -43,7 +43,7 @@ export function getCyberExpertResponse(userMessage: string): AssistantResponse {
       [contacts.women, contacts.emergency],
     );
 
-  if (/money lost|lost money|scammed|টাকা (?:চলে|কেটে|পাঠিয়ে|পাঠিয়ে|ফেরত)|প্রতারিত|taka.*(?:geche|gese|ferot)/.test(text))
+  if (/money lost|lost money|scammed|টাকা (?:চলে|কেটে|পাঠিয়ে|পাঠিয়ে|ফেরত|খোয়া|খোয়া|হারিয়ে|হারিয়ে)|প্রতারিত|taka.*(?:geche|gese|ferot)/.test(text))
     return response(
       'সংশ্লিষ্ট ব্যাংক বা MFS-এর অফিসিয়াল সহায়তায় এখনই যোগাযোগ করুন। লেনদেনের ID, সময়, পরিমাণ ও প্রাপকের তথ্য দিয়ে জানান যে প্রতারণা হয়েছে; তারা কী ব্যবস্থা নিতে পারে জিজ্ঞাসা করুন। প্রমাণ সংরক্ষণ করুন এবং পুলিশের কাছে অভিযোগের উপযুক্ত পদ্ধতি জেনে নিন। টাকা ফেরত পাওয়া নিশ্চিত নয়।',
       'Contact your bank or MFS through its official support immediately. Give the transaction ID, time, amount and recipient details, explain the suspected fraud and ask what action is possible. Keep the evidence and ask local police how to report the incident. Recovery is not guaranteed.',

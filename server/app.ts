@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { resolve } from 'node:path';
 import type { Store, Row } from './store.js';
 import { config, allowedOrigins } from './config.js';
-import { publicUser, token, hash, passwordHash, verifyPassword, sessionToken, validSessionToken, rotateSessionVersion } from './security.js';
+import { publicUser, token, hash, passwordHash, verifyPassword, sessionToken, validSessionToken, rotateSessionVersion, resetTokenPurpose } from './security.js';
 import { localScan, finish, normalizeUrl, normalizePhone } from './engine.js';
 import { enrich, aiSettings } from './providers.js';
 import { defaultBrands } from './brands.js';
@@ -141,7 +141,7 @@ export function createApp(store: Store) {
     await store.insert('authTokens', {
       userId: u.id,
       tokenHash: hash(value),
-      purpose,
+      purpose: purpose === 'reset' ? resetTokenPurpose(u.passwordHash) : purpose,
       expiresAt: new Date(Date.now() + 30 * 60000),
     });
     return value;
@@ -250,7 +250,13 @@ export function createApp(store: Store) {
     if (consuming.has(digest)) throw fail(400, 'This link is already being used.');
     consuming.add(digest);
     try {
-      const t = await store.consumeToken(digest, data.purpose);
+      const candidate = data.purpose === 'reset'
+        ? (await store.list('authTokens', { tokenHash: digest }))[0]
+        : undefined;
+      // Preserve verification tokens when a caller submits the wrong purpose.
+      if (data.purpose === 'reset' && !candidate?.purpose?.startsWith('reset:'))
+        throw fail(400, 'This reset link is invalid or expired. Request a new link.');
+      const t = await store.consumeToken(digest, candidate?.purpose || data.purpose);
       if (!t || new Date(t.expiresAt) < new Date())
         throw fail(400, 'This link is invalid or expired.');
       if (data.purpose === 'verify') {
@@ -258,13 +264,16 @@ export function createApp(store: Store) {
       } else {
         const user = (await store.list('users', { id: t.userId }))[0];
         if (!user) throw fail(400, 'This account is no longer available.');
+        if (t.purpose !== resetTokenPurpose(user.passwordHash))
+          throw fail(400, 'Account credentials changed. Request a new password reset link.');
         if (!await store.updateUserIfPasswordMatches(user.id, user.passwordHash, { passwordHash: await passwordHash(data.password!) }))
           throw fail(409, 'Account credentials changed. Request a new password reset link.');
       }
       if (data.purpose === 'reset') {
         for (const s of await store.list('sessions', { userId: t.userId }))
           await store.remove('sessions', s.id);
-        for (const token of await store.list('authTokens', { userId: t.userId, purpose: 'reset' })) await store.remove('authTokens',token.id);
+        for (const token of await store.list('authTokens', { userId: t.userId }))
+          if (token.purpose === 'reset' || token.purpose.startsWith('reset:')) await store.remove('authTokens', token.id);
       }
       res.json({ ok: true });
     } finally {
@@ -469,9 +478,10 @@ export function createApp(store: Store) {
   );
   app.post('/api/contacts', auth, async (req: Authed, res) => {
     const data = z.object({ name: z.string().trim().min(2).max(80), email }).parse(req.body);
-    if ((await store.list('contacts', { userId: req.user!.id })).length >= 10)
+    const contact = await store.insertContactWithinLimit({ ...data, userId: req.user!.id });
+    if (!contact)
       throw fail(400, 'You can add up to 10 trusted contacts.');
-    res.status(201).json(await store.insert('contacts', { ...data, userId: req.user!.id }));
+    res.status(201).json(contact);
   });
   app.delete('/api/contacts/:id', auth, async (req: Authed, res) => {
     const row = await own('contacts', String(req.params.id), req.user!.id);

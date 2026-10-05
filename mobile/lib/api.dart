@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -32,9 +33,17 @@ class SafeLinkApi {
         client = client ?? http.Client();
 
   String get base => customBase ?? normalizeBase(defaultBase);
+  int get sessionRevision => _sessionRevision;
 
   Future<T> _withStorage<T>(Future<T> Function() operation) {
-    final result = _storageQueue.then((_) => operation());
+    final result = _storageQueue.then((_) async {
+      try {
+        return await operation();
+      } on PlatformException {
+        throw const ApiException(
+            'Secure storage is unavailable. Please retry before closing the app.');
+      }
+    });
     _storageQueue =
         result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return result;
@@ -75,10 +84,11 @@ class SafeLinkApi {
         await storage.delete(key: 'api_url');
       }
       // Never forward a session issued by one server to another server.
-      token = sessionBase == base ? savedToken : null;
+      token = sessionBase == base && savedToken?.isNotEmpty == true
+          ? savedToken
+          : null;
       if (token == null) {
-        await storage.delete(key: 'session');
-        await storage.delete(key: 'session_api_base');
+        await _eraseStoredSession();
       }
     });
   }
@@ -86,10 +96,25 @@ class SafeLinkApi {
   Future<void> clearSession() async {
     _sessionRevision++;
     token = null;
-    await _withStorage(() async {
-      await storage.delete(key: 'session');
-      await storage.delete(key: 'session_api_base');
-    });
+    await _withStorage(_eraseStoredSession);
+  }
+
+  Future<void> _eraseStoredSession() async {
+    // Invalidate the server binding first. If deletion fails, an empty value
+    // also prevents a stored bearer session from being restored.
+    Object? failure;
+    for (final key in ['session_api_base', 'session']) {
+      try {
+        await storage.delete(key: key);
+      } on PlatformException {
+        try {
+          await storage.write(key: key, value: '');
+        } on PlatformException catch (error) {
+          failure = error;
+        }
+      }
+    }
+    if (failure != null) throw failure;
   }
 
   Future<void> setBaseUrl(String? url) async {
@@ -103,8 +128,7 @@ class SafeLinkApi {
     customBase = newBase;
     await _withStorage(() async {
       if (changed) {
-        await storage.delete(key: 'session');
-        await storage.delete(key: 'session_api_base');
+        await _eraseStoredSession();
       }
       if (newBase == null) {
         await storage.delete(key: 'api_url');
@@ -149,7 +173,11 @@ class SafeLinkApi {
     if (response.statusCode == 401 &&
         request.headers['Authorization'] != null &&
         request.headers['Authorization'] == headers['Authorization']) {
-      await clearSession();
+      try {
+        await clearSession();
+      } on ApiException catch (error) {
+        throw ApiException(error.message, statusCode: 401);
+      }
     }
     dynamic data;
     try {
@@ -181,7 +209,8 @@ class SafeLinkApi {
   }
 
   Future<Map<String, dynamic>> authenticate(
-      String mode, String email, String password, String name) async {
+      String mode, String email, String password, String name,
+      {bool Function()? isActive}) async {
     final sessionBase = base;
     final revision = ++_sessionRevision;
     final data = await call('/auth/$mode', method: 'POST', body: {
@@ -198,13 +227,22 @@ class SafeLinkApi {
       throw const ApiException('The server did not issue a mobile session.');
     }
     await _withStorage(() async {
-      if (revision != _sessionRevision || base != sessionBase) {
+      if (revision != _sessionRevision ||
+          base != sessionBase ||
+          isActive?.call() == false) {
         throw const ApiException(
             'The server or session changed. Please sign in again.');
       }
-      await storage.write(key: 'session_api_base', value: sessionBase);
-      await storage.write(key: 'session', value: data['token'] as String);
-      if (revision != _sessionRevision) {
+      try {
+        await storage.write(key: 'session_api_base', value: sessionBase);
+        await storage.write(key: 'session', value: data['token'] as String);
+      } on PlatformException {
+        token = null;
+        await _eraseStoredSession();
+        rethrow;
+      }
+      if (revision != _sessionRevision || isActive?.call() == false) {
+        await _eraseStoredSession();
         throw const ApiException(
             'The server or session changed. Please sign in again.');
       }
@@ -254,6 +292,8 @@ class SafeLinkApi {
 
   Future<Map<String, dynamic>> image(
       XFile file, String kind, bool external) async {
+    final revision = _sessionRevision;
+    final requestBase = base;
     if (await file.length() > 5 * 1024 * 1024) {
       throw const ApiException('Choose an image smaller than 5 MB.');
     }
@@ -267,6 +307,10 @@ class SafeLinkApi {
     request.files.add(http.MultipartFile.fromBytes(
         'image', await file.readAsBytes(),
         filename: file.name));
+    if (revision != _sessionRevision || requestBase != base) {
+      throw const ApiException(
+          'The server or session changed. Please try again.');
+    }
     final data = await _send(request);
     return _scanResult(data);
   }

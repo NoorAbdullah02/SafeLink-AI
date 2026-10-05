@@ -4005,7 +4005,7 @@ body { background: var(--bg); color: var(--text); }
   position: fixed;
   bottom: 24px;
   right: 24px;
-  z-index: 1050;
+  z-index: 60;
   display: inline-flex;
   align-items: center;
   gap: 10px;

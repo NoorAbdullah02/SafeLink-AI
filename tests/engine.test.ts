@@ -100,3 +100,11 @@ test('unrelated negation cannot hide a credential request', () => {
 test('phone extraction accepts separators and Bengali country digits without consuming nearby amounts', () => {
   assert.deepEqual(extractPhones('Call +৮৮০১৭১২৩৪৫৬৭৮ and 01712-345678. Fee 20 taka.'), ['+8801712345678']);
 });
+
+test('email subdomains are not scanned as URLs while HTTP userinfo destinations still are', () => {
+  for (const text of ['Write to person@support.example.com', 'Contact person@bkash-login.example.com only.', 'Mail person@www.example.com']) {
+    assert.deepEqual(extractUrls(text), [], text);
+    assert.deepEqual(localScan(text, 'message').urls, [], text);
+  }
+  assert.deepEqual(extractUrls('See https://bkash.com@evil.example/login'), ['https://bkash.com@evil.example/login']);
+});

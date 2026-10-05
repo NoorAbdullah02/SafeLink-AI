@@ -124,7 +124,7 @@ export async function enrich(
             'Google Safe Browsing returned ' +
             [...new Set(data.matches.map((m) => m.threatType))].join(', ') +
             '.',
-          weight: 80,
+          weight: Math.max(0, 80 - r.score),
         });
         r.score = Math.max(80, r.score);
       }

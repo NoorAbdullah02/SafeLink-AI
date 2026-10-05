@@ -10,6 +10,7 @@ export interface Store {
   memory: boolean;
   list(table: Table, where?: Row): Promise<Row[]>;
   insert(table: Table, row: Row): Promise<Row>;
+  insertContactWithinLimit(row: Row): Promise<Row | undefined>;
   update(table: Table, id: string, row: Row): Promise<Row | undefined>;
   updateUserIfPasswordMatches(id: string, passwordDigest: string, row: Row): Promise<Row | undefined>;
   remove(table: Table, id: string): Promise<void>;
@@ -41,6 +42,12 @@ export class MemoryStore implements Store {
     const row = (this.data.get(t) || []).find((x) => x.id === id);
     if (row) Object.assign(row, structuredClone(r));
     return row ? structuredClone(row) : undefined;
+  }
+  async insertContactWithinLimit(row: Row): Promise<Row | undefined> {
+    // No await between the count and insertion: concurrent demo calls cannot
+    // observe the same free slot. insert() mutates synchronously before resolving.
+    if ((this.data.get('contacts') || []).filter((contact) => contact.userId === row.userId).length >= 10) return undefined;
+    return this.insert('contacts', row);
   }
   async remove(t: Table, id: string) {
     this.data.set(
@@ -79,7 +86,8 @@ export function createStore(): Store {
       'DATABASE_URL required. For local development only, explicitly set DEMO_MEMORY=true.',
     );
   }
-  const db = drizzle(neon(config.databaseUrl));
+  const sql = neon(config.databaseUrl);
+  const db = drizzle(sql);
   return {
     memory: false,
     async list(t, w = {}) {
@@ -105,6 +113,23 @@ export function createStore(): Store {
           .where(eq(tables[t].id, id))
           .returning()
       )[0];
+    },
+    async insertContactWithinLimit(row) {
+      // The lock and count must be different statements at ReadCommitted.
+      // A waiting caller obtains a fresh count snapshot after the previous
+      // transaction commits; a single CTE would not provide that guarantee.
+      const results = await sql.transaction([
+        sql`SELECT id FROM users WHERE id = ${row.userId} FOR UPDATE`,
+        sql`INSERT INTO trusted_contacts (user_id, name, email)
+          SELECT ${row.userId}, ${row.name}, ${row.email}
+          WHERE (SELECT COUNT(*) FROM trusted_contacts WHERE user_id = ${row.userId}) < 10
+          RETURNING id, user_id, name, email, created_at`,
+      ], { isolationLevel: 'ReadCommitted' });
+      const inserted = results[1][0];
+      return inserted ? {
+        id: inserted.id, userId: inserted.user_id, name: inserted.name,
+        email: inserted.email, createdAt: inserted.created_at,
+      } : undefined;
     },
     async remove(t, id) {
       await db.delete(tables[t]).where(eq(tables[t].id, id));

@@ -1,10 +1,77 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:safelink_ai/api.dart';
+
+class FaultyStorage extends FlutterSecureStorage {
+  final values = <String, String>{};
+  bool failDelete = false, failAllWrites = false, failSessionWrite = false;
+  Completer<void>? pendingSessionWrite;
+  @override
+  Future<String?> read(
+          {required String key,
+          IOSOptions? iOptions,
+          AndroidOptions? aOptions,
+          LinuxOptions? lOptions,
+          WebOptions? webOptions,
+          MacOsOptions? mOptions,
+          WindowsOptions? wOptions}) async =>
+      values[key];
+  @override
+  Future<void> write(
+      {required String key,
+      required String? value,
+      IOSOptions? iOptions,
+      AndroidOptions? aOptions,
+      LinuxOptions? lOptions,
+      WebOptions? webOptions,
+      MacOsOptions? mOptions,
+      WindowsOptions? wOptions}) async {
+    if (failAllWrites || (failSessionWrite && key == 'session')) {
+      throw PlatformException(code: 'storage-unavailable');
+    }
+    if (key == 'session') await pendingSessionWrite?.future;
+    if (value == null) {
+      values.remove(key);
+    } else {
+      values[key] = value;
+    }
+  }
+
+  @override
+  Future<void> delete(
+      {required String key,
+      IOSOptions? iOptions,
+      AndroidOptions? aOptions,
+      LinuxOptions? lOptions,
+      WebOptions? webOptions,
+      MacOsOptions? mOptions,
+      WindowsOptions? wOptions}) async {
+    if (failDelete) throw PlatformException(code: 'storage-unavailable');
+    values.remove(key);
+  }
+}
+
+class DelayedImage extends XFile {
+  final bytes = Completer<Uint8List>();
+  DelayedImage() : super('fixture.png');
+  @override
+  Future<int> length() async => 3;
+  @override
+  Future<Uint8List> readAsBytes() => bytes.future;
+}
+
+http.Response sessionResponse() => http.Response(
+    jsonEncode({
+      'token': 'fixture-session',
+      'user': {'name': 'Fixture'},
+    }),
+    200);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -229,5 +296,111 @@ void main() {
         api.scan('Example message', 'message', false),
         throwsA(isA<ApiException>()
             .having((e) => e.message, 'message', contains('incomplete scan'))));
+  });
+
+  test('Dismissed sign-in cannot persist a late session', () async {
+    final response = Completer<http.Response>();
+    final storage = FaultyStorage();
+    final api = SafeLinkApi(
+        storage: storage, client: MockClient((_) async => response.future));
+    addTearDown(api.close);
+    var active = true;
+    final login = api.authenticate(
+        'login', 'fixture@example.test', 'password', '',
+        isActive: () => active);
+    final check = expectLater(login, throwsA(isA<ApiException>()));
+    active = false;
+    response.complete(sessionResponse());
+    await check;
+    expect(api.token, isNull);
+    expect(storage.values, isEmpty);
+  });
+
+  test('Dismissal during secure write removes the uncommitted session',
+      () async {
+    final storage = FaultyStorage()..pendingSessionWrite = Completer<void>();
+    final api = SafeLinkApi(
+        storage: storage, client: MockClient((_) async => sessionResponse()));
+    addTearDown(api.close);
+    var active = true;
+    final login = api.authenticate(
+        'login', 'fixture@example.test', 'password', '',
+        isActive: () => active);
+    final check = expectLater(login, throwsA(isA<ApiException>()));
+    await Future<void>.delayed(Duration.zero);
+    expect(storage.values['session_api_base'], api.base);
+    active = false;
+    storage.pendingSessionWrite!.complete();
+    await check;
+    expect(api.token, isNull);
+    expect(storage.values, isEmpty);
+  });
+
+  test('Partial secure-storage failure cannot leave a restorable login',
+      () async {
+    final storage = FaultyStorage()..failSessionWrite = true;
+    final api = SafeLinkApi(
+        storage: storage, client: MockClient((_) async => sessionResponse()));
+    addTearDown(api.close);
+    await expectLater(
+        api.authenticate('login', 'fixture@example.test', 'password', ''),
+        throwsA(isA<ApiException>()
+            .having((e) => e.message, 'message', contains('Secure storage'))));
+    expect(api.token, isNull);
+    expect(storage.values, isEmpty);
+  });
+
+  test('Logout invalidates stored credentials when secure deletion fails',
+      () async {
+    final storage = FaultyStorage()..failDelete = true;
+    final api = SafeLinkApi(
+        storage: storage,
+        client: MockClient((_) async => http.Response('{}', 200)));
+    addTearDown(api.close);
+    api.token = 'fixture-session';
+    storage.values
+        .addAll({'session': api.token!, 'session_api_base': api.base});
+    await api.logout();
+    expect(api.token, isNull);
+    expect(storage.values['session'], '');
+    await api.restore();
+    expect(api.token, isNull);
+    expect(api.headers['Authorization'], isNull);
+  });
+
+  test('Storage failure retains unauthorized status for account reset',
+      () async {
+    final storage = FaultyStorage()
+      ..failDelete = true
+      ..failAllWrites = true;
+    final api = SafeLinkApi(
+        storage: storage,
+        client: MockClient((_) async => http.Response('{}', 401)));
+    addTearDown(api.close);
+    api.token = 'fixture-session';
+    await expectLater(
+        api.call('/me'),
+        throwsA(isA<ApiException>()
+            .having((e) => e.statusCode, 'status', 401)
+            .having((e) => e.message, 'message', contains('Secure storage'))));
+    expect(api.token, isNull);
+  });
+
+  test('Image waiting on file bytes cannot send after logout', () async {
+    var requests = 0;
+    final api = SafeLinkApi(client: MockClient((_) async {
+      requests++;
+      return http.Response('{}', 200);
+    }));
+    addTearDown(api.close);
+    api.token = 'fixture-session';
+    final file = DelayedImage();
+    final upload = api.image(file, 'qr', false);
+    final check = expectLater(upload, throwsA(isA<ApiException>()));
+    await Future<void>.delayed(Duration.zero);
+    await api.clearSession();
+    file.bytes.complete(Uint8List.fromList([1, 2, 3]));
+    await check;
+    expect(requests, 0);
   });
 }

@@ -55,12 +55,12 @@ export function skeleton(s: string) {
   };
   return domainToUnicode(s).replace(/[аеорсу хіјӏ013]/g, (c) => lookalikes[c] || c);
 }
-export function extractUrls(text: string): string[] {
+export function extractUrls(text: string, limit = 10): string[] {
   const matches =
     text.match(
-      /(?:https?:\/\/|www\.)[^\s<>"\u0964]+|(?<![@\p{L}\p{N}_-])(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+(?:[\p{L}]{2,63}|xn--[a-z0-9-]+)(?::\d{1,5})?(?:[/?#][^\s<>"\u0964]*)?/giu,
+      /https?:\/\/[^\s<>"\u0964]+|(?<![@.\p{L}\p{N}_-])www\.[^\s<>"\u0964]+|(?<![@.\p{L}\p{N}_-])(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+(?:[\p{L}]{2,63}|xn--[a-z0-9-]+)(?::\d{1,5})?(?:[/?#][^\s<>"\u0964]*)?/giu,
     ) || [];
-  return [...new Set(matches.map((s) => s.replace(/[.,!?;:।)\]}]+$/u, '')))].slice(0, 10);
+  return [...new Set(matches.map((s) => s.replace(/[.,!?;:।)\]}]+$/u, '')))].slice(0, limit);
 }
 export function normalizePhone(s: string) {
   let n = s.replace(/[০-৯]/g, (c) => String('০১২৩৪৫৬৭৮৯'.indexOf(c))).replace(/[^0-9+]/g, '');

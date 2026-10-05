@@ -76,3 +76,19 @@ test('insecure AI endpoints are unavailable without contacting them', () => {
     }
   } finally { [process.env.LLM_API_KEY, process.env.LLM_BASE_URL] = before; }
 });
+
+test('threat-list evidence reports only the points needed to reach the score floor', async () => {
+  const previousFetch = globalThis.fetch, previousKey = process.env.SAFE_BROWSING_API_KEY;
+  process.env.SAFE_BROWSING_API_KEY = 'mock-only';
+  globalThis.fetch = async () => new Response(JSON.stringify({ matches: [{ threatType: 'MALWARE', threat: { url: 'https://evil.example/' } }] }), { status: 200 });
+  try {
+    for (const startingScore of [30, 100]) {
+      const scan = localScan('https://evil.example', 'url');
+      scan.score = startingScore;
+      const result = await enrich(scan, 'Controlled sample', true);
+      const contribution = result.evidence.find((entry) => entry.id === 'google-threat')!.weight;
+      assert.equal(contribution, Math.max(0, 80 - startingScore));
+      assert.equal(result.score, startingScore + contribution);
+    }
+  } finally { globalThis.fetch = previousFetch; process.env.SAFE_BROWSING_API_KEY = previousKey; }
+});

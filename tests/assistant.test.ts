@@ -30,6 +30,15 @@ test('incident advice does not promise recovery or mislabel the women support li
   assert(!getCyberExpertResponse('জিডি কীভাবে করব?').reply.includes('সঠিক আইনি ধারাসহ'));
 });
 
+test('the Bangla lost-money preset returns transaction incident guidance', () => {
+  for (const question of ['টাকা খোয়া গেলে দ্রুত কী করব?', 'আমার টাকা খোয়া গেছে', 'টাকা হারিয়ে ফেলেছি']) {
+    const result = getCyberExpertResponse(question);
+    assert.match(result.reply, /লেনদেনের ID/);
+    assert.match(result.reply, /টাকা ফেরত পাওয়া নিশ্চিত নয়/);
+    assert(result.hotlines.some((contact) => contact.number === '16247'));
+  }
+});
+
 test('external redaction removes URL paths, emails, Bengali digits and labelled credentials', () => {
   const result = sanitizeExternalText('Email me@example.com OTP ১২৩৪৫৬ password: secretword https://example.com/private-path?token=secret and bkash-login.io/reset/private-code');
   for (const secret of ['me@example.com', '১২৩৪৫৬', 'secretword', 'private-path', 'token=secret', 'private-code']) assert(!result.includes(secret), secret);
@@ -70,4 +79,25 @@ test('assistant validates AI output and reports external submission when using a
     assert(!sent.includes('key=secret'));
     assert(!sent.includes('/reset/private'));
   } finally { process.env.LLM_API_KEY = previous; globalThis.fetch = previousFetch; }
+});
+
+test('external redaction covers every URL beyond the local scan limit', () => {
+  const text = Array.from({ length: 12 }, (_, index) => `https://site${index}.example/private-${index}?token=demo-${index}`).join(' ');
+  assert.equal(localScan(text, 'message').urls.length, 10);
+  const sanitized = sanitizeExternalText(text);
+  assert(!sanitized.includes('/private-'), sanitized);
+  assert(!sanitized.includes('demo-'), sanitized);
+  assert(sanitized.includes('https://site11.example'));
+  assert.equal(sanitizeExternalText(sanitized), sanitized);
+  assert.equal(sanitizeExternalText('Open https://user:password@evil.example/private?key=value'), 'Open https://evil.example');
+  assert.equal(sanitizeExternalText('Email নাম@support.example.com'), 'Email [email removed]');
+});
+
+test('English and Bangla labelled secrets redact punctuation and quoted spaces completely', () => {
+  const text = 'My password: S3cr.et!value and পাসওয়ার্ড: গোপনশব্দ; পাসওয়ার্ড = আরেকগোপন। ওটিপি: ১২৩৪৫৬ পিন: 9876 token="two secret words!"';
+  const sanitized = sanitizeExternalText(text);
+  for (const value of ['S3cr', '.et!value', 'গোপনশব্দ', 'আরেকগোপন', '১২৩৪৫৬', '9876', 'two secret words']) assert(!sanitized.includes(value), sanitized);
+  assert.equal(sanitizeExternalText(sanitized), sanitized);
+  const advice = 'আপনার ওটিপি বা পিন কখনো কাউকে দেবেন না।';
+  assert.equal(sanitizeExternalText(advice), advice);
 });

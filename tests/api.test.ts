@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import { createApp } from '../server/app.js';
 import { MemoryStore } from '../server/store.js';
-import { hash, token, passwordHash, sessionToken } from '../server/security.js';
+import { hash, token, passwordHash, sessionToken, resetTokenPurpose } from '../server/security.js';
 test('accounts, private history, reports, authorization and logout work end to end', async () => {
   const store = new MemoryStore(),
     app = createApp(store),
@@ -71,12 +71,12 @@ test('only distinct approved reporters increase community risk', async () => {
 test('reset tokens expire and are single use', async () => {
   const store = new MemoryStore(),
     app = createApp(store);
-  const user = await store.insert('users', { email: 'reset@example.com' }),
+  const user = await store.insert('users', { email: 'reset@example.com', passwordHash: await passwordHash('Original reset password 123') }),
     t = token();
   await store.insert('authTokens', {
     userId: user.id,
     tokenHash: hash(t),
-    purpose: 'reset',
+    purpose: resetTokenPurpose(user.passwordHash),
     expiresAt: new Date(Date.now() + 100000),
   });
   await request(app)
@@ -225,7 +225,7 @@ test('an old-password login finishing after a reset cannot create a valid sessio
     passwordHash: await passwordHash('Old test password 123'),
   });
   const reset = token();
-  await store.insert('authTokens', { userId: user.id, tokenHash: hash(reset), purpose: 'reset', expiresAt: new Date(Date.now() + 60000) });
+  await store.insert('authTokens', { userId: user.id, tokenHash: hash(reset), purpose: resetTokenPurpose(user.passwordHash), expiresAt: new Date(Date.now() + 60000) });
   let notifyReady!: () => void, release!: () => void;
   const ready = new Promise<void>((resolve) => { notifyReady = resolve; });
   const gate = new Promise<void>((resolve) => { release = resolve; });

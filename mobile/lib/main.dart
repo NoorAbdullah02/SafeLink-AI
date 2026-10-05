@@ -473,14 +473,15 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     final newUrl = await showDialog<String>(
         context: context, builder: (_) => ServerDialog(initialUrl: api.base));
     if (newUrl == null || !mounted) return;
+    final previous = api.base;
     try {
-      final previous = api.base;
       await api.setBaseUrl(newUrl);
       if (!mounted) return;
       if (api.base != previous) _clearAccount();
       setState(() => status = 'Connecting to SafeLink…');
       await initialize();
     } catch (e) {
+      if (mounted && api.base != previous) _clearAccount();
       message(e);
     }
   }
@@ -2272,6 +2273,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
         builder: (_) => CyberAssistantSheet(
             api: api,
             onDial: _dialPhone,
+            onUnauthorized: _clearAccount,
             localAdvice: _getOfflineCyberAdvice,
             initialPrompt: initialPrompt));
   }
@@ -2636,6 +2638,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                     tooltip: 'Delete scan',
                     icon: Icon(Icons.delete_outline),
                     onPressed: () async {
+                      final revision = api.sessionRevision;
                       final confirmed = await showDialog<bool>(
                           context: context,
                           builder: (c) => AlertDialog(
@@ -2650,7 +2653,9 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                                         onPressed: () => Navigator.pop(c, true),
                                         child: Text('Delete'))
                                   ]));
-                      if (confirmed == true) {
+                      if (confirmed == true &&
+                          mounted &&
+                          revision == api.sessionRevision) {
                         await action(() async {
                           await api.call('/scans/${r['id']}', method: 'DELETE');
                         });
@@ -2662,45 +2667,21 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
         ]
       ];
   Future<void> addContact() async {
-    final name = TextEditingController(), email = TextEditingController();
-    final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (c) => AlertDialog(
-                title: Text('Add trusted contact'),
-                content: Column(mainAxisSize: MainAxisSize.min, children: [
-                  TextField(
-                      controller: name,
-                      decoration: InputDecoration(labelText: 'Name')),
-                  SizedBox(height: 12),
-                  TextField(
-                      controller: email,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: InputDecoration(labelText: 'Email')),
-                  SizedBox(height: 12),
-                  Text('Only add someone who agrees to receive your alerts.',
-                      style: TextStyle(fontSize: 12))
-                ]),
-                actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(c, false),
-                      child: Text('Cancel')),
-                  TextButton(
-                      onPressed: () => Navigator.pop(c, true),
-                      child: Text('Add'))
-                ]));
-    if (confirmed == true) {
+    if (busy || user == null || !mounted) return;
+    final revision = api.sessionRevision;
+    final contact = await showDialog<Map<String, String>>(
+        context: context, builder: (_) => const TrustedContactDialog());
+    if (contact != null && mounted && revision == api.sessionRevision) {
       await action(() async {
-        await api.call('/contacts',
-            method: 'POST',
-            body: {'name': name.text.trim(), 'email': email.text.trim()});
+        await api.call('/contacts', method: 'POST', body: contact);
       });
       await loadAccountData();
     }
-    name.dispose();
-    email.dispose();
   }
 
   Future<void> alertContact(dynamic contact) async {
+    if (busy || user == null || !mounted) return;
+    final revision = api.sessionRevision;
     if (history.isEmpty) {
       message('Save a scan first.');
       return;
@@ -2717,7 +2698,7 @@ ${evidence.map((dynamic e) => '- ${e is Map ? "${e['title']}: ${e['detail']}" : 
                     subtitle: Text(scan['createdAt']),
                     onTap: () => Navigator.pop(c, scan['id']))
             ])));
-    if (selected == null) return;
+    if (selected == null || !mounted || revision != api.sessionRevision) return;
     await action(() async {
       final alert = await api.call('/alerts',
           method: 'POST',
@@ -2847,11 +2828,13 @@ class CyberAssistantSheet extends StatefulWidget {
   final Future<void> Function(String) onDial;
   final Map<String, dynamic> Function(String) localAdvice;
   final String? initialPrompt;
+  final VoidCallback? onUnauthorized;
   const CyberAssistantSheet(
       {super.key,
       required this.api,
       required this.onDial,
       required this.localAdvice,
+      this.onUnauthorized,
       this.initialPrompt});
   @override
   State<CyberAssistantSheet> createState() => _CyberAssistantSheetState();
@@ -2874,6 +2857,7 @@ class _CyberAssistantSheetState extends State<CyberAssistantSheet> {
   ];
   bool external = false;
   bool sending = false;
+  String? inputError;
 
   @override
   void initState() {
@@ -2904,6 +2888,10 @@ class _CyberAssistantSheetState extends State<CyberAssistantSheet> {
   Future<void> send([String? preset]) async {
     final query = (preset ?? textController.text).trim();
     if (query.isEmpty || sending || !mounted) return;
+    if (query.length > 3000) {
+      setState(() => inputError = 'Keep the question within 3000 characters.');
+      return;
+    }
     final history = messages.skip(1).toList();
     final recent = history
         .skip(history.length > 4 ? history.length - 4 : 0)
@@ -2912,6 +2900,7 @@ class _CyberAssistantSheetState extends State<CyberAssistantSheet> {
     setState(() {
       messages.add({'role': 'user', 'text': query});
       sending = true;
+      inputError = null;
       textController.clear();
     });
     scrollToBottom();
@@ -2920,16 +2909,13 @@ class _CyberAssistantSheetState extends State<CyberAssistantSheet> {
       final data = await widget.api.call('/assistant',
           method: 'POST',
           body: {'message': query, 'history': recent, 'external': external});
-      if (data is! Map || data['reply'] is! String) {
-        throw const ApiException('Unexpected assistant response.');
+      reply = normalizeReply(data);
+    } catch (error) {
+      if (error is ApiException && error.statusCode == 401) {
+        widget.onUnauthorized?.call();
       }
-      reply = Map<String, dynamic>.from(data);
-    } catch (_) {
-      reply = {
-        ...widget.localAdvice(query),
-        'source': 'local',
-        'offline': true
-      };
+      reply = normalizeReply(
+          {...widget.localAdvice(query), 'source': 'local', 'offline': true});
     }
     if (!mounted) return;
     setState(() {
@@ -2939,129 +2925,177 @@ class _CyberAssistantSheetState extends State<CyberAssistantSheet> {
     scrollToBottom();
   }
 
+  Map<String, dynamic> normalizeReply(dynamic data) {
+    if (data is! Map ||
+        data['reply'] is! String ||
+        (data['reply'] as String).trim().isEmpty) {
+      throw const ApiException('Unexpected assistant response.');
+    }
+    return {
+      'reply': data['reply'],
+      'source': data['source'] == 'ai' ? 'ai' : 'local',
+      'externalUsed': data['externalUsed'] == true,
+      'offline': data['offline'] == true,
+      'suggestions': data['suggestions'] is List
+          ? (data['suggestions'] as List)
+              .whereType<String>()
+              .where((s) => s.trim().isNotEmpty && s.length <= 3000)
+              .take(8)
+              .toList()
+          : <String>[],
+      'hotlines': data['hotlines'] is List
+          ? (data['hotlines'] as List)
+              .where((h) =>
+                  h is Map &&
+                  h['name'] is String &&
+                  h['number'] is String &&
+                  RegExp(r'^\+?\d{3,16}$').hasMatch(h['number'] as String))
+              .take(8)
+              .toList()
+          : <Map<String, dynamic>>[],
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return SafeArea(
-        child: SizedBox(
-      height: MediaQuery.sizeOf(context).height * .88,
-      child: Column(children: [
-        Padding(
-            padding: EdgeInsets.fromLTRB(16, 12, 8, 0),
-            child: Row(children: [
-              Icon(Icons.smart_toy_outlined, color: green),
-              SizedBox(width: 10),
-              Expanded(
-                  child: Text('সাইবার নিরাপত্তা সহকারী',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16))),
-              IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  tooltip: 'Close assistant',
-                  icon: Icon(Icons.close)),
-            ])),
-        SwitchListTile(
-            dense: true,
-            title: Text('Optional external AI'),
-            subtitle: Text(
-                'On: your question and recent chat are sent to the configured AI provider. Off: local guidance.'),
-            value: external,
-            onChanged:
-                sending ? null : (value) => setState(() => external = value)),
-        Divider(height: 1),
-        Expanded(
-            child: ListView.builder(
-                controller: scrollController,
-                padding: EdgeInsets.all(14),
-                itemCount: messages.length,
-                itemBuilder: (_, index) {
-                  final msg = messages[index];
-                  final isUser = msg['role'] == 'user';
-                  final hotlines = (msg['hotlines'] as List?) ?? [];
-                  return Align(
-                      alignment:
-                          isUser ? Alignment.centerRight : Alignment.centerLeft,
-                      child: Container(
-                        margin: EdgeInsets.symmetric(vertical: 6),
-                        padding: EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                            color: isUser
-                                ? colors.primaryContainer
-                                : colors.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(14)),
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (!isUser)
-                                Text(
-                                    msg['source'] == 'ai'
-                                        ? 'External AI · may be wrong'
-                                        : msg['externalUsed'] == true
-                                            ? 'External AI attempted · local guidance shown'
-                                            : msg['offline'] == true
-                                                ? 'Offline local guidance'
-                                                : 'Local safety guidance',
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        color: colors.onSurfaceVariant)),
-                              SizedBox(height: 4),
-                              SelectableText(msg['text']?.toString() ?? '',
-                                  style: TextStyle(fontSize: 13, height: 1.45)),
-                              if (hotlines.isNotEmpty)
-                                Wrap(spacing: 6, runSpacing: 6, children: [
-                                  for (final hotline in hotlines)
-                                    if (hotline is Map)
-                                      ActionChip(
-                                          avatar: Icon(Icons.phone_outlined,
-                                              size: 16),
-                                          label: Text(
-                                              '${hotline['name']}: ${hotline['number']}'),
-                                          onPressed: () => widget.onDial(
-                                              hotline['number']?.toString() ??
-                                                  '')),
-                                ]),
-                            ]),
-                      ));
-                })),
-        if (sending) LinearProgressIndicator(),
-        if ((messages.last['suggestions'] as List?)?.isNotEmpty == true)
-          SizedBox(
-              height: 46,
-              child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: EdgeInsets.symmetric(horizontal: 12),
-                  children: [
-                    for (final suggestion
-                        in messages.last['suggestions'] as List)
-                      Padding(
-                          padding: EdgeInsets.only(right: 6),
-                          child: ActionChip(
-                              label: Text(suggestion.toString()),
-                              onPressed: sending
-                                  ? null
-                                  : () => send(suggestion.toString()))),
-                  ])),
-        Padding(
-            padding: EdgeInsets.fromLTRB(
-                14, 8, 14, 12 + MediaQuery.viewInsetsOf(context).bottom),
-            child: Row(children: [
-              Expanded(
-                  child: TextField(
-                      controller: textController,
-                      maxLength: 3000,
-                      maxLines: 2,
-                      minLines: 1,
-                      decoration: InputDecoration(
-                          hintText: 'প্রশ্ন লিখুন…', counterText: ''),
-                      onSubmitted: (_) => send())),
-              SizedBox(width: 8),
-              IconButton.filled(
-                  tooltip: 'Send question',
-                  onPressed: sending ? null : () => send(),
-                  icon: Icon(Icons.send)),
-            ])),
-      ]),
-    ));
+        child: Padding(
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(context).bottom),
+            child: SizedBox(
+              height: MediaQuery.sizeOf(context).height * .88,
+              child: Column(children: [
+                Expanded(
+                    child: ListView(controller: scrollController, children: [
+                  Padding(
+                      padding: EdgeInsets.fromLTRB(16, 12, 8, 0),
+                      child: Row(children: [
+                        Icon(Icons.smart_toy_outlined, color: green),
+                        SizedBox(width: 10),
+                        Expanded(
+                            child: Text('সাইবার নিরাপত্তা সহকারী',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16))),
+                        IconButton(
+                            onPressed: () => Navigator.pop(context),
+                            tooltip: 'Close assistant',
+                            icon: Icon(Icons.close)),
+                      ])),
+                  SwitchListTile(
+                      dense: true,
+                      title: Text('Optional external AI'),
+                      subtitle: Text(
+                          'On: your question and recent chat are sent to the configured AI provider. Off: local guidance.'),
+                      value: external,
+                      onChanged: sending
+                          ? null
+                          : (value) => setState(() => external = value)),
+                  Divider(height: 1),
+                  for (final msg in messages)
+                    Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 14),
+                        child: Builder(builder: (_) {
+                          final isUser = msg['role'] == 'user';
+                          final hotlines = (msg['hotlines'] as List?) ?? [];
+                          return Align(
+                              alignment: isUser
+                                  ? Alignment.centerRight
+                                  : Alignment.centerLeft,
+                              child: Container(
+                                margin: EdgeInsets.symmetric(vertical: 6),
+                                padding: EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                    color: isUser
+                                        ? colors.primaryContainer
+                                        : colors.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(14)),
+                                child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (!isUser)
+                                        Text(
+                                            msg['source'] == 'ai'
+                                                ? 'External AI · may be wrong'
+                                                : msg['externalUsed'] == true
+                                                    ? 'External AI attempted · local guidance shown'
+                                                    : msg['offline'] == true
+                                                        ? 'Offline local guidance'
+                                                        : 'Local safety guidance',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color:
+                                                    colors.onSurfaceVariant)),
+                                      SizedBox(height: 4),
+                                      SelectableText(
+                                          msg['text']?.toString() ?? '',
+                                          style: TextStyle(
+                                              fontSize: 13, height: 1.45)),
+                                      if (hotlines.isNotEmpty)
+                                        Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            children: [
+                                              for (final hotline in hotlines)
+                                                if (hotline is Map)
+                                                  ActionChip(
+                                                      avatar: Icon(
+                                                          Icons.phone_outlined,
+                                                          size: 16),
+                                                      label: Text(
+                                                          '${hotline['name']}: ${hotline['number']}'),
+                                                      onPressed: () =>
+                                                          widget.onDial(hotline[
+                                                                      'number']
+                                                                  ?.toString() ??
+                                                              '')),
+                                            ]),
+                                    ]),
+                              ));
+                        })),
+                ])),
+                if (sending) LinearProgressIndicator(),
+                if ((messages.last['suggestions'] as List?)?.isNotEmpty == true)
+                  SizedBox(
+                      height: 30 + MediaQuery.textScalerOf(context).scale(16),
+                      child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          children: [
+                            for (final suggestion
+                                in messages.last['suggestions'] as List)
+                              Padding(
+                                  padding: EdgeInsets.only(right: 6),
+                                  child: ActionChip(
+                                      label: Text(suggestion.toString()),
+                                      onPressed: sending
+                                          ? null
+                                          : () => send(suggestion.toString()))),
+                          ])),
+                Padding(
+                    padding: EdgeInsets.fromLTRB(14, 8, 14, 12),
+                    child: Row(children: [
+                      Expanded(
+                          child: TextField(
+                              controller: textController,
+                              maxLength: 3000,
+                              maxLines: 2,
+                              minLines: 1,
+                              decoration: InputDecoration(
+                                  hintText: 'প্রশ্ন লিখুন…',
+                                  counterText: '',
+                                  errorText: inputError),
+                              onSubmitted: (_) => send())),
+                      SizedBox(width: 8),
+                      IconButton.filled(
+                          tooltip: 'Send question',
+                          onPressed: sending ? null : () => send(),
+                          icon: Icon(Icons.send)),
+                    ])),
+              ]),
+            )));
   }
 }
 
@@ -3198,7 +3232,12 @@ class _AuthPageState extends State<AuthPage> {
                                                 register ? 'register' : 'login',
                                                 email.text.trim(),
                                                 password.text,
-                                                name.text.trim());
+                                                name.text.trim(),
+                                                isActive: () =>
+                                                    mounted &&
+                                                    ModalRoute.of(context)
+                                                            ?.isCurrent ==
+                                                        true);
                                         if (context.mounted) {
                                           Navigator.pop(context, user);
                                         }
@@ -3245,6 +3284,11 @@ class _AuthPageState extends State<AuthPage> {
                                             method: 'POST',
                                             body: {'email': email.text.trim()});
                                         if (mounted) {
+                                          if (data is! Map ||
+                                              data['message'] is! String) {
+                                            throw const ApiException(
+                                                'Unexpected password reset response.');
+                                          }
                                           setState(
                                               () => error = data['message']);
                                         }
@@ -3261,6 +3305,67 @@ class _AuthPageState extends State<AuthPage> {
                               child: Text('Send password reset email'))
                         ]))
               ]))));
+}
+
+class TrustedContactDialog extends StatefulWidget {
+  const TrustedContactDialog({super.key});
+  @override
+  State<TrustedContactDialog> createState() => _TrustedContactDialogState();
+}
+
+class _TrustedContactDialogState extends State<TrustedContactDialog> {
+  final form = GlobalKey<FormState>();
+  final name = TextEditingController(), email = TextEditingController();
+
+  @override
+  void dispose() {
+    name.dispose();
+    email.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+          scrollable: true,
+          title: Text('Add trusted contact'),
+          content: Form(
+              key: form,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                TextFormField(
+                    controller: name,
+                    maxLength: 80,
+                    decoration: InputDecoration(labelText: 'Name'),
+                    validator: (value) => (value?.trim().length ?? 0) < 2 ||
+                            (value?.trim().length ?? 0) > 80
+                        ? 'Use 2–80 characters.'
+                        : null),
+                SizedBox(height: 12),
+                TextFormField(
+                    controller: email,
+                    maxLength: 254,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: InputDecoration(labelText: 'Email'),
+                    validator: (value) => RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+                                .hasMatch(value?.trim() ?? '') &&
+                            (value?.trim().length ?? 0) <= 254
+                        ? null
+                        : 'Enter a valid email.'),
+                SizedBox(height: 12),
+                Text('Only add someone who agrees to receive your alerts.',
+                    style: TextStyle(fontSize: 12)),
+              ])),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context), child: Text('Cancel')),
+            TextButton(
+                onPressed: () {
+                  if (form.currentState!.validate()) {
+                    Navigator.pop(context,
+                        {'name': name.text.trim(), 'email': email.text.trim()});
+                  }
+                },
+                child: Text('Add')),
+          ]);
 }
 
 class ServerDialog extends StatefulWidget {
@@ -3286,6 +3391,7 @@ class _ServerDialogState extends State<ServerDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text('Server Settings'),
         content: Column(
           mainAxisSize: MainAxisSize.min,

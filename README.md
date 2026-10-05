@@ -46,7 +46,7 @@ pnpm audit
 pnpm demo:verify
 ```
 
-The local audit completed on 5 October 2026. All 56 backend tests and 26 Flutter tests passed, Flutter analysis found no issues, the production build passed and the full dependency audit reported zero known advisories. Browser checks covered account/scan/history flows, keyboard navigation, responsive layouts and isolated family/community/admin fixtures. Flutter tests include core pages and Message demo cards at 320 logical pixels with 180% text scaling.
+The local audit completed on 5 October 2026. All 73 website/API tests (64 backend and nine React DOM regressions) and 39 Flutter tests passed, Flutter analysis found no issues, the production build passed and the full dependency audit reported zero known advisories. Browser checks covered account/scan/history flows, keyboard navigation, responsive layouts and isolated family/community/admin fixtures. Flutter tests include core pages and Message demo cards at 320 logical pixels with 180% text scaling.
 
 Software tests do not measure real-world scam detection accuracy. Current results and remaining checks are in [the audit](docs/AUDIT-2026-10-04.md) and [validation record](docs/VALIDATION.md), with final [desktop](docs/qa/final-desktop.png) and [phone](docs/qa/final-phone.png) screenshots.
 

@@ -3,6 +3,8 @@ import { promisify } from 'node:util';
 const derive = promisify(scrypt);
 export const token = () => randomBytes(32).toString('hex');
 export const hash = (s: string) => createHash('sha256').update(s).digest('hex');
+// Bind reset links to the same credential/revocation version as sessions.
+export const resetTokenPurpose = (passwordDigest: string) => 'reset:' + hash(passwordDigest);
 export function sessionToken(passwordDigest: string): string {
   const random = token();
   const binding = createHmac('sha256', passwordDigest).update(random).digest('hex');

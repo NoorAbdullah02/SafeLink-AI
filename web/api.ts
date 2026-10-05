@@ -33,7 +33,7 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
       headers.set('Content-Type', 'application/json');
     }
     const response = await fetch(
-      (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '') + '/api' + path,
+      (import.meta.env?.VITE_API_URL || '').replace(/\/+$/, '') + '/api' + path,
       {
         ...options,
         credentials: 'include',

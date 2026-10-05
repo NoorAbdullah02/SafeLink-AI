@@ -168,6 +168,8 @@ export default function App() {
   const sessionRevision = useRef(0);
   const sessionUser = useRef<User | null>(null);
   const simpleRequest = useRef(false);
+  const profileRequest = useRef(0);
+  const healthRequest = useRef<AbortController | null>(null);
   function replaceSession(next: User | null) {
     sessionRevision.current += 1;
     advanceSessionVersion();
@@ -185,6 +187,23 @@ export default function App() {
       setUser(updated);
     }
     return true;
+  }
+  async function updateProfile(name: string) {
+    const expectedSession = sessionRevision.current;
+    const request = ++profileRequest.current;
+    try {
+      const next = await api<User>('/me', {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+      });
+      if (expectedSession !== sessionRevision.current || request !== profileRequest.current)
+        return false;
+      return updateAccount(next, 'name');
+    } catch (error) {
+      if (expectedSession !== sessionRevision.current || request !== profileRequest.current)
+        return false;
+      throw error;
+    }
   }
   const [action] = useState(() => new URLSearchParams(location.search).get('action'));
   const menuRef = useModalFocus(() => setMobileMenu(false), smallScreen && mobileMenu && workspace);
@@ -206,19 +225,25 @@ export default function App() {
         }
       });
   }
+  function loadHealth() {
+    healthRequest.current?.abort();
+    const controller = new AbortController();
+    healthRequest.current = controller;
+    void api('/health', { signal: controller.signal })
+      .then((next) => {
+        if (!controller.signal.aborted) setHealth(next);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setHealth({ offline: true });
+      });
+  }
   const checkHealth = () => {
-    api('/health')
-      .then(setHealth)
-      .catch(() => setHealth({ offline: true }));
+    loadHealth();
     if (!sessionUser.current) void restoreSession();
   };
   useEffect(() => {
     const controller = new AbortController();
-    api('/health', { signal: controller.signal })
-      .then(setHealth)
-      .catch(() => {
-        if (!controller.signal.aborted) setHealth({ offline: true });
-      });
+    loadHealth();
     void restoreSession(controller.signal);
     window.addEventListener('online', checkHealth);
     const sessionExpired = () => {
@@ -228,6 +253,7 @@ export default function App() {
     window.addEventListener('safelink:session-expired', sessionExpired);
     return () => {
       controller.abort();
+      healthRequest.current?.abort();
       window.removeEventListener('online', checkHealth);
       window.removeEventListener('safelink:session-expired', sessionExpired);
     };
@@ -510,6 +536,7 @@ export default function App() {
               {...props}
               health={health}
               setUser={(next) => updateAccount(next, 'name')}
+              updateProfile={updateProfile}
             />
           )}
           {page === 'demo' && (
@@ -664,6 +691,7 @@ function Scanner({
     [external, setExternal] = useState(false),
     [save, setSave] = useState(true),
     [busy, setBusy] = useState(false),
+    [clipboardReading, setClipboardReading] = useState(false),
     [result, setResult] = useState<ScanResult | null>(null),
     [error, setError] = useState('');
   const requestRef = useRef<AbortController | null>(null);
@@ -676,10 +704,31 @@ function Scanner({
     };
   }, []);
 
-  async function runScan(scanKind: ScanKind, scanText: string, scanFile: File | null = null) {
-    if (requestRef.current) return;
-    const controller = new AbortController();
+  function finishRequest(controller: AbortController) {
+    if (requestRef.current !== controller) return;
+    requestRef.current = null;
+    if (mounted.current) {
+      setBusy(false);
+      setClipboardReading(false);
+    }
+  }
+  function cancelRequest() {
+    const controller = requestRef.current;
+    if (!controller) return;
+    controller.abort();
+    finishRequest(controller);
+  }
+  async function runScan(
+    scanKind: ScanKind,
+    scanText: string,
+    scanFile: File | null = null,
+    existingRequest: AbortController | null = null,
+  ) {
+    if (requestRef.current && requestRef.current !== existingRequest) return;
+    const controller = existingRequest || new AbortController();
+    if (controller.signal.aborted || !mounted.current) return;
     requestRef.current = controller;
+    setClipboardReading(false);
     setError('');
     setBusy(true);
     setResult(null);
@@ -716,8 +765,7 @@ function Scanner({
     } catch (e) {
       if (mounted.current && !controller.signal.aborted) setError((e as Error).message);
     } finally {
-      if (requestRef.current === controller) requestRef.current = null;
-      if (mounted.current) setBusy(false);
+      finishRequest(controller);
     }
   }
 
@@ -741,26 +789,34 @@ function Scanner({
 
   async function pasteAndAutoScan() {
     if (busy || requestRef.current) return;
+    if (!navigator.clipboard?.readText) {
+      notify(
+        'আপনার ব্রাউজারে ক্লিপবোর্ড সরাসরি পড়ার সমর্থন নেই। ইনপুট বক্সে ম্যানুয়ালি পেস্ট করুন।',
+      );
+      return;
+    }
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setBusy(true);
+    setClipboardReading(true);
+    setError('');
     try {
-      if (!navigator.clipboard?.readText) {
-        notify(
-          'আপনার ব্রাউজারে ক্লিপবোর্ড সরাসরি পড়ার সমর্থন নেই। ইনপুট বক্সে ম্যানুয়ালি পেস্ট করুন।',
-        );
-        return;
-      }
       const clip = (await navigator.clipboard.readText()).trim();
+      if (!mounted.current || controller.signal.aborted) return;
       if (!clip) {
         notify('ক্লিপবোর্ডে কোনো টেক্সট পাওয়া যায়নি।');
         return;
       }
-      if (!mounted.current || requestRef.current) return;
       const detectedKind = detectScanKind(clip);
       setKind(detectedKind);
       setText(clip);
       setFile(null);
-      await runScan(detectedKind, clip);
+      await runScan(detectedKind, clip, null, controller);
     } catch {
-      notify('ক্লিপবোর্ড পড়ার অনুমতি দিন অথবা ইনপুট বক্সে ম্যানুয়ালি পেস্ট করুন।');
+      if (mounted.current && !controller.signal.aborted)
+        notify('ক্লিপবোর্ড পড়ার অনুমতি দিন অথবা ইনপুট বক্সে ম্যানুয়ালি পেস্ট করুন।');
+    } finally {
+      finishRequest(controller);
     }
   }
   async function scan(e: FormEvent) {
@@ -1006,7 +1062,8 @@ function Scanner({
                     </button>
                     <Button type="submit" disabled={busy || health?.offline}>
                       {busy ? <Loader2 className="spin" size={18} /> : <ScanLine size={18} />}{' '}
-                      {busy ? 'Analyzing…' : 'Scan Now'} {!busy && <ArrowRight size={17} />}
+                      {clipboardReading ? 'Reading clipboard…' : busy ? 'Analyzing…' : 'Scan Now'}{' '}
+                      {!busy && <ArrowRight size={17} />}
                     </Button>
                   </div>
                 </div>
@@ -1195,13 +1252,17 @@ function Scanner({
         <div className="card analyzing" role="status">
           <Loader2 className="spin" />
           <div>
-            <strong>Looking for the signals…</strong>
+            <strong>
+              {clipboardReading ? 'Reading your clipboard…' : 'Looking for the signals…'}
+            </strong>
             <p>
-              {kind === 'screenshot'
-                ? 'Reading the screenshot may take up to a minute on first use.'
-                : 'Checking available evidence. External services may take a few seconds.'}
+              {clipboardReading
+                ? 'Allow clipboard access, or cancel and paste into the input yourself.'
+                : kind === 'screenshot'
+                  ? 'Reading the screenshot may take up to a minute on first use.'
+                  : 'Checking available evidence. External services may take a few seconds.'}
             </p>
-            <Button variant="outline" size="sm" onClick={() => requestRef.current?.abort()}>
+            <Button variant="outline" size="sm" onClick={cancelRequest}>
               Cancel scan
             </Button>
           </div>
@@ -2095,12 +2156,13 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
   ]);
   const [inputMessage, setInputMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatBodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => () => requestRef.current?.abort(), []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({
+    chatBodyRef.current?.scrollTo({
+      top: chatBodyRef.current.scrollHeight,
       behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
     });
   }, [messages, isTyping]);
@@ -2224,6 +2286,8 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
 
         <div
           className="assistant-chat-body"
+          ref={chatBodyRef}
+          tabIndex={0}
           role="log"
           aria-live="polite"
           aria-label="Assistant conversation"
@@ -2277,7 +2341,6 @@ function CyberAssistantModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
           )}
-          <div ref={messagesEndRef} />
         </div>
 
         {messages[messages.length - 1]?.suggestions && (
@@ -2792,7 +2855,7 @@ function HistoryPage(props: Props & { version: number; initialSelection?: ScanRe
                       setDeleting(r.id);
                       try {
                         await api('/scans/' + r.id, { method: 'DELETE' });
-                        if (selected?.id === r.id) setSelected(null);
+                        setSelected((current) => (current?.id === r.id ? null : current));
                         props.refresh();
                       } catch (e) {
                         props.notify((e as Error).message);
@@ -3254,9 +3317,9 @@ function Family(props: Props & { onSimple: () => void; simpleBusy: boolean; heal
               ) : alertsResource.error ? (
                 <p>Alerts could not be loaded.</p>
               ) : alerts.length ? (
-                alerts
-                  .slice(-10)
-                  .reverse()
+                [...alerts]
+                  .sort((left, right) => +new Date(right.createdAt) - +new Date(left.createdAt))
+                  .slice(0, 10)
                   .map((a) => (
                     <div className="category-row" key={a.id}>
                       <span>{new Date(a.createdAt).toLocaleString()}</span>
@@ -3273,7 +3336,13 @@ function Family(props: Props & { onSimple: () => void; simpleBusy: boolean; heal
     </>
   );
 }
-function SettingsPage(props: Props & { health: any; setUser: (u: User | null) => boolean }) {
+function SettingsPage(
+  props: Props & {
+    health: any;
+    setUser: (u: User | null) => boolean;
+    updateProfile: (name: string) => Promise<boolean>;
+  },
+) {
   const [name, setName] = useState(props.user?.name || '');
   const [pending, setPending] = useState<'profile' | 'verify' | 'logout' | null>(null);
   return (
@@ -3294,9 +3363,7 @@ function SettingsPage(props: Props & { health: any; setUser: (u: User | null) =>
               if (pending) return;
               setPending('profile');
               try {
-                const updated = props.setUser(
-                  await api('/me', { method: 'PATCH', body: JSON.stringify({ name }) }),
-                );
+                const updated = await props.updateProfile(name);
                 if (updated) props.notify('Profile updated.');
               } catch (e) {
                 props.notify((e as Error).message);
@@ -3792,7 +3859,7 @@ function AuthModal({
               try {
                 const data = await post('/auth/' + mode, {
                   email,
-                  password,
+                  ...(mode !== 'forgot' ? { password } : {}),
                   ...(mode === 'register' ? { name } : {}),
                 });
                 if (mode === 'forgot') {

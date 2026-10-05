@@ -5,7 +5,7 @@ import request from 'supertest';
 import QRCode from 'qrcode';
 import { createApp } from '../server/app.js';
 import { MemoryStore } from '../server/store.js';
-import { hash, token, passwordHash, verifyPassword } from '../server/security.js';
+import { hash, token, passwordHash, verifyPassword, resetTokenPurpose } from '../server/security.js';
 
 const credentials = { name: 'Acceptance User', email: 'acceptance@example.com', password: 'A secure acceptance password 123' };
 async function mailFixture(run: (sent: any[], failNext: () => void) => Promise<void>) {
@@ -141,7 +141,7 @@ test('competing reset links cannot both replace credentials after reading the sa
   const store = new MemoryStore(), app = createApp(store);
   const user = await store.insert('users', { email: credentials.email, name: credentials.name, passwordHash: await passwordHash(credentials.password) });
   const values = [token(), token()];
-  for (const value of values) await store.insert('authTokens', { userId: user.id, tokenHash: hash(value), purpose: 'reset', expiresAt: new Date(Date.now() + 60000) });
+  for (const value of values) await store.insert('authTokens', { userId: user.id, tokenHash: hash(value), purpose: resetTokenPurpose(user.passwordHash), expiresAt: new Date(Date.now() + 60000) });
   let pending = 0, release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; }), list = store.list.bind(store);
   store.list = async (table, where) => {
@@ -172,4 +172,60 @@ test('administrator revocation cannot overwrite a password reset that wins the r
   assert.equal(final.disabled, true);
   assert(await verifyPassword('Newer secure password 456', final.passwordHash));
   assert(!await verifyPassword(credentials.password, final.passwordHash));
+});
+
+test('a late reset-link issue cannot resurrect a link invalidated by a completed password reset', async () => {
+  await mailFixture(async (sent) => {
+    const store = new MemoryStore(), app = createApp(store), account = request.agent(app);
+    await account.post('/api/auth/register').send(credentials).expect(201);
+    const user = (await store.list('users', { email: credentials.email }))[0], first = token();
+    await store.insert('authTokens', { userId: user.id, tokenHash: hash(first), purpose: resetTokenPurpose(user.passwordHash), expiresAt: new Date(Date.now() + 60000) });
+    const insert = store.insert.bind(store);
+    let ready!: () => void, release!: () => void;
+    const waiting = new Promise<void>((resolve) => { ready = resolve; }), gate = new Promise<void>((resolve) => { release = resolve; });
+    store.insert = async (table, row) => {
+      if (table === 'authTokens' && row.purpose.startsWith('reset')) { ready(); await gate; }
+      return insert(table, row);
+    };
+    const forgotten = account.post('/api/auth/forgot').send({ email: credentials.email }).then((result) => result);
+    await waiting;
+    await request(app).post('/api/auth/confirm').send({ token: first, purpose: 'reset', password: 'Replacement secure password 456' }).expect(200);
+    release();
+    assert.equal((await forgotten).status, 200);
+    const late = mailToken(sent.at(-1));
+    await request(app).post('/api/auth/confirm').send({ token: late, purpose: 'reset', password: 'Stale replacement password 789' }).expect(400);
+    assert(await verifyPassword('Replacement secure password 456', (await store.list('users', { id: user.id }))[0].passwordHash));
+  });
+});
+
+test('concurrent contact additions cannot exceed the ten-contact limit', async () => {
+  const store = new MemoryStore(), app = createApp(store), account = request.agent(app);
+  await account.post('/api/auth/register').send(credentials).expect(201);
+  const user = (await store.list('users', { email: credentials.email }))[0];
+  for (let index = 0; index < 9; index++) await store.insert('contacts', { userId: user.id, name: 'Existing contact', email: `existing${index}@example.com` });
+  const list = store.list.bind(store);
+  let reads = 0, release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  store.list = async (table, where) => {
+    const rows = await list(table, where);
+    if (table === 'contacts') { reads++; if (reads === 2) release(); await gate; }
+    return rows;
+  };
+  const results = await Promise.all([0, 1].map((index) => account.post('/api/contacts').send({ name: 'New contact', email: `new${index}@example.com` })));
+  assert.deepEqual(results.map((result) => result.status).sort(), [201, 400]);
+  assert.equal((await list('contacts', { userId: user.id })).length, 10);
+});
+
+test('legacy unbound reset links require a new request without changing the password', async () => {
+  const store = new MemoryStore(), app = createApp(store);
+  const user = await store.insert('users', {
+    email: credentials.email, name: credentials.name, passwordHash: await passwordHash(credentials.password),
+  }), legacy = token();
+  await store.insert('authTokens', {
+    userId: user.id, tokenHash: hash(legacy), purpose: 'reset', expiresAt: new Date(Date.now() + 60000),
+  });
+  const response = await request(app).post('/api/auth/confirm')
+    .send({ token: legacy, purpose: 'reset', password: 'Replacement secure password 456' }).expect(400);
+  assert.match(response.body.error, /Request a new link/);
+  assert.equal((await store.list('users', { id: user.id }))[0].passwordHash, user.passwordHash);
 });
