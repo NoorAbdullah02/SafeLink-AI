@@ -33,7 +33,7 @@ The APK's default API URL points to the existing published service. Deploy the u
 
 ## Cloud APK build
 
-On 5 October 2026, [run 37228833017](https://github.com/NoorAbdullah02/SafeLink-AI/actions/runs/37228833017) completed with **SUCCESS** for source `c9c2284` (`c9c22845b9dc0589a87657b10c9e4d176504ff84`). Both `web-api` and `flutter` jobs passed. The Linux Flutter job used Flutter 3.47.3 and Java 17, passed analysis/tests, built `app-debug.apk`, verified its signature with `apksigner` and generated the SHA-256 artifact.
+On 5 October 2026, [run 37300673707](https://github.com/NoorAbdullah02/SafeLink-AI/actions/runs/37300673707) completed with **SUCCESS** for source `3d20ae5` (`3d20ae59f2bdd6aa6db5a53da888592351441d68`). Both `web-api` and `flutter` jobs passed. The Linux Flutter job used Flutter 3.47.3 and Java 17, passed analysis/tests, built `app-debug.apk`, verified its signature with `apksigner` and generated the SHA-256 artifact.
 
 The source was pushed to `codex/safelink-audit` and opened as [draft PR #1](https://github.com/NoorAbdullah02/SafeLink-AI/pull/1). `master` remains unchanged. The APK artifact is from the exact source revision above; later documentation-only commits do not change its provenance. Backend deployment and a signed public release remain separate pending steps.
 
@@ -41,13 +41,13 @@ The source was pushed to `codex/safelink-audit` and opened as [draft PR #1](http
 2. Unzip it to obtain `app-debug.apk` and its SHA-256 file. Verify the downloaded archive and APK checksums before installation; the 5 October local verification passed as recorded below.
 3. Install and rehearse on the intended phone. ADB found zero authorized devices during the local audit, so physical-device acceptance remains unverified.
 
-The downloaded artifact was verified locally on 5 October 2026. The ZIP digest matched GitHub's artifact digest, the extracted APK matched its included SHA-256 file, and local `apksigner verify` exited 0 with a valid v2 debug signature. The checked APK is at `work/releases/c9c2284/app-debug.apk`; no physical-device installation was performed.
+The downloaded artifact was verified locally on 5 October 2026. The ZIP digest matched GitHub's artifact digest, the extracted APK matched its included SHA-256 file, and local `apksigner verify` exited 0 with a valid v2 debug signature. The checked APK is at `work/releases/3d20ae5/app-debug.apk`; no physical-device installation was performed.
 
 | Verification                 | Recorded result                                                    |
 | ---------------------------- | ------------------------------------------------------------------ |
-| Archive SHA-256              | `dc8a7b4741b2498df7009129b087f8a14c81f24b354e71342d160d50703ad421` |
-| APK SHA-256                  | `139a34a28da4359f4dc6ea094d310c2d04909b107f3f89cf80f7df558f70a333` |
-| APK size                     | 177,186,343 bytes                                                  |
+| Archive SHA-256              | `2035986de2d7c9d63fd1e804693b38f53ad891c30be161fd7a1ff6ef10f53215` |
+| APK SHA-256                  | `908acde77d476b15989281644ed4e08139a6adf1efa8b32dd4a033c00440a394` |
+| APK size                     | 177,196,291 bytes                                                  |
 | Local signature check        | `apksigner verify`: exit 0, valid v2 debug signature               |
 | Physical-device installation | Not performed                                                      |
 
